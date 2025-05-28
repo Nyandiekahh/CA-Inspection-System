@@ -1,0 +1,49 @@
+# Core Django packages
+Django==4.2.7
+djangorestframework==3.14.0
+django-cors-headers==4.3.1
+python-decouple==3.8
+django-extensions==3.2.3
+
+# Image handling and processing
+Pillow==10.1.0
+pillow-heif==0.13.0
+
+# Document generation dependencies
+python-docx==0.8.11
+reportlab==4.0.7
+
+# Mathematical operations
+numpy==1.24.3
+
+# File type detection and utilities
+python-magic==0.4.27
+
+# Date and time utilities
+python-dateutil==2.8.2
+
+# Additional utilities for document generation
+lxml==4.9.3
+
+# Optional: Background task processing (if you want async report generation)
+# celery==5.3.4
+# redis==5.0.1
+
+# Optional: PostgreSQL support for production
+# psycopg2-binary==2.9.9
+
+# Optional: Development tools
+# django-debug-toolbar==4.2.0
+
+# Optional: Advanced image processing
+# opencv-python==4.8.1.78
+
+# Optional: PDF manipulation
+# PyPDF2==3.0.1
+
+# Optional: Excel file handling (if needed for data import/export)
+# openpyxl==3.1.2
+# xlsxwriter==3.1.9
+
+# Security and validation
+# bleach==6.1.0  # For sanitizing HTML content
