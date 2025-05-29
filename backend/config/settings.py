@@ -208,11 +208,11 @@ for directory in [
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
-# If you want to be more specific, uncomment and use these instead
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
     'http://0.0.0.0:3000',
+    'https://ca-inspection-system.vercel.app'
 ]
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
