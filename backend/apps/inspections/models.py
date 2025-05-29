@@ -39,9 +39,9 @@ class Inspection(models.Model):
     
     # General data
     station_type = models.CharField(max_length=10, choices=[
-        ('AM', 'AM Radio'), 
-        ('FM', 'FM Radio'), 
-        ('TV', 'Television')
+        ('DAB', 'DAB (Digital Audio Broadcasting)'),
+        ('FM', 'FM (Frequency Modulation)'),
+        ('DTT', 'DTT (Digital Terrestrial Television) / DVB-T')
     ], blank=True, null=True)
     transmitting_site_name = models.CharField(max_length=255, blank=True, null=True)
     longitude = models.CharField(max_length=50, blank=True, null=True)
