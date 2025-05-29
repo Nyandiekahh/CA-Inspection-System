@@ -2,6 +2,8 @@
   "name": "ca-inspection-frontend",
   "version": "0.1.0",
   "private": true,
+  "main": "public/electron.js",
+  "homepage": "./",
   "dependencies": {
     "@headlessui/react": "^1.7.19",
     "@heroicons/react": "^2.2.0",
@@ -29,7 +31,10 @@
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
-    "analyze": "npm run build && npx bundle-analyzer build/static/js/*.js"
+    "analyze": "npm run build && npx bundle-analyzer build/static/js/*.js",
+    "electron": "ELECTRON_IS_DEV=false electron .",
+    "electron-dev": "ELECTRON_IS_DEV=true electron .",
+    "dist": "npm run build && electron-builder"
   },
   "eslintConfig": {
     "extends": [
@@ -52,8 +57,43 @@
   "devDependencies": {
     "@tailwindcss/forms": "^0.5.10",
     "autoprefixer": "^10.4.21",
+    "electron": "^36.3.2",
+    "electron-builder": "^26.0.12",
+    "electron-is-dev": "^3.0.1",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17"
   },
-  "proxy": "http://127.0.0.1:8000"
+  "proxy": "http://127.0.0.1:8000",
+  "build": {
+    "appId": "com.yourcompany.ca-inspection",
+    "productName": "CA Inspection App",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "build/**/*",
+      "node_modules/**/*",
+      "public/electron.js"
+    ],
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        },
+        {
+          "target": "deb",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "public/favicon.ico"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "public/favicon.ico"
+    }
+  }
 }

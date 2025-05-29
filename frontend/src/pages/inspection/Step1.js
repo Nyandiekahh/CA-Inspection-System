@@ -705,9 +705,9 @@ const Step1 = () => {
                   className={`form-input ${errors.station_type ? 'form-input-error' : ''}`}
                 >
                   <option value="">Select station type</option>
-                  <option value="AM">AM Radio</option>
-                  <option value="FM">FM Radio</option>
-                  <option value="TV">Television</option>
+                  <option value="DAB">DAB (Digital Audio Broadcasting)</option>
+                  <option value="FM">FM (Frequency Modulation)</option>
+                  <option value="DTT">DTT (Digital Terrestrial Television) / DVB-T</option>
                 </select>
                 {errors.station_type && (
                   <p className="form-error">{errors.station_type.message}</p>
@@ -727,12 +727,12 @@ const Step1 = () => {
                 )}
               </div>
                 
-              {/* GPS Location */}
+            {/* GPS Location */}
               <GPSLocationComponent
-              setValue={setValue}
-              watch={watch}
-              register={register}
-              errors={errors}
+                setValue={setValue}
+                watch={watch}
+                register={register}
+                errors={errors}
               />
               
               {/* Physical Address */}
@@ -769,24 +769,36 @@ const Step1 = () => {
                 </div>
               </div>
 
-              {/* Additional Information */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="form-label">Altitude (m above sea level)</label>
-                  <input
-                    {...register('altitude')}
-                    className="form-input"
-                    placeholder="Altitude in meters"
-                  />
-                </div>
-                <div>
-                  <label className="form-label">Name of the Land Owner</label>
-                  <input
-                    {...register('land_owner_name')}
-                    className="form-input"
-                    placeholder="Land owner name"
-                  />
-                </div>
+              {/* Land Owner Information */}
+              <div>
+                <label className="form-label">Name of the Land Owner</label>
+                <input
+                  {...register('land_owner_name')}
+                  type="text"
+                  className="form-input"
+                  placeholder="Land owner name"
+                  autoComplete="off"
+                />
+              </div>
+
+              {/* Manual Altitude Input */}
+              <div>
+                <label className="form-label">Altitude (m above sea level)</label>
+                <input
+                  key="altitude-input"
+                  name="altitude"
+                  type="text"
+                  className="form-input"
+                  placeholder="Altitude in meters"
+                  autoComplete="off"
+                  onChange={(e) => setValue('altitude', e.target.value)}
+                  defaultValue={watch('altitude') || ''}
+                  onFocus={(e) => e.target.select()}
+                  style={{ pointerEvents: 'auto' }}
+                />
+                {errors.altitude && (
+                  <p className="form-error">{errors.altitude.message}</p>
+                )}
               </div>
 
               {/* Other Telecoms Operator */}
