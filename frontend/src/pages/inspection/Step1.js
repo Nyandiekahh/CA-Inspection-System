@@ -13,6 +13,7 @@ import { broadcastersAPI, inspectionsAPI } from '../../services/api';
 import StepIndicator from '../../components/StepIndicator';
 import ProgressBar from '../../components/ProgressBar';
 import LoadingSpinner from '../../components/LoadingSpinner';
+import GPSLocationComponent from '../../components/GPSLocationComponent';
 
 // Form validation schema
 const schema = yup.object({
@@ -725,33 +726,15 @@ const Step1 = () => {
                   <p className="form-error">{errors.transmitting_site_name.message}</p>
                 )}
               </div>
-
-              {/* Geographical Coordinates */}
-              <div className="border-t border-gray-200 pt-4">
-                <h3 className="text-md font-medium text-gray-900 mb-4">
-                  Geographical Coordinates
-                </h3>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="form-label">Longitude (dd mm ss) E</label>
-                    <input
-                      {...register('longitude')}
-                      className="form-input"
-                      placeholder="e.g., 36 48 12"
-                    />
-                  </div>
-                  <div>
-                    <label className="form-label">Latitude (dd mm ss) N/S</label>
-                    <input
-                      {...register('latitude')}
-                      className="form-input"
-                      placeholder="e.g., 01 17 35 S"
-                    />
-                  </div>
-                </div>
-              </div>
-
+              {/* GPS Location */}
+              <GPSLocationComponent
+              setValue={setValue}
+              watch={watch}
+              register={register}
+              errors={errors}
+              />
+              
               {/* Physical Address */}
               <div className="border-t border-gray-200 pt-4">
                 <h3 className="text-md font-medium text-gray-900 mb-4">
