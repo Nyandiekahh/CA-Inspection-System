@@ -108,6 +108,23 @@ export const broadcastersAPI = {
   delete: (id) => api.delete(`/broadcasters/broadcasters/${id}/`),
 };
 
+// Programs API - NEW
+export const programsAPI = {
+  getAll: () => api.get('/broadcasters/programs/'),
+  getById: (id) => api.get(`/broadcasters/programs/${id}/`),
+  create: (data) => api.post('/broadcasters/programs/', data),
+  update: (id, data) => api.put(`/broadcasters/programs/${id}/`, data),
+  delete: (id) => api.delete(`/broadcasters/programs/${id}/`),
+  
+  // Program-Broadcaster relationship endpoints
+  getBroadcasters: (id) => api.get(`/broadcasters/programs/${id}/broadcasters/`),
+  addBroadcaster: (id, broadcasterData) => api.post(`/broadcasters/programs/${id}/add_broadcaster/`, broadcasterData),
+  removeBroadcaster: (id, broadcasterData) => api.post(`/broadcasters/programs/${id}/remove_broadcaster/`, broadcasterData),
+  
+  // Search programs by name
+  search: (query) => api.get('/broadcasters/programs/', { params: { search: query } }),
+};
+
 // General Data API  
 export const generalDataAPI = {
   getAll: () => api.get('/broadcasters/general-data/'),

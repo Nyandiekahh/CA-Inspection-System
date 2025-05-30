@@ -36,7 +36,9 @@ const schema = yup.object({
   estimated_antenna_losses: yup.string(),
   estimated_feeder_losses: yup.string(),
   estimated_multiplexer_losses: yup.string(),
+  estimated_system_losses: yup.string(),
   effective_radiated_power: yup.string(),
+  effective_radiated_power_dbw: yup.string(),
   antenna_catalog_attached: yup.boolean(),
   
   // Studio Link
@@ -45,6 +47,7 @@ const schema = yup.object({
   studio_serial_number: yup.string(),
   studio_frequency: yup.string(),
   studio_polarization: yup.string(),
+  stl_type: yup.string(),
   signal_description: yup.string(),
   
   // Final Info
@@ -57,6 +60,14 @@ const STEPS = [
   { id: 2, title: 'Tower Info' },
   { id: 3, title: 'Transmitter' },
   { id: 4, title: 'Antenna & Final' },
+];
+
+const STL_TYPES = [
+  { value: '', label: 'Select STL Type' },
+  { value: 'ip_based', label: 'IP-Based STL (Internet Protocol)' },
+  { value: 'satellite', label: 'Satellite STL' },
+  { value: 'vhf', label: 'VHF STL' },
+  { value: 'studio_on_site', label: 'Studio On Site (SOS)' },
 ];
 
 const Step4 = () => {
@@ -101,21 +112,124 @@ const Step4 = () => {
   const watchHasElectricalTilt = watch('has_electrical_tilt');
   const watchHasNullFill = watch('has_null_fill');
 
-  // Auto-save mutation - EXACT SAME PATTERN AS STEP 1, 2 & 3
+  // Watch values for ERP calculation
+  const watchAntennaGain = watch('antenna_gain');
+  const watchAntennaLosses = watch('estimated_antenna_losses');
+  const watchFeederLosses = watch('estimated_feeder_losses');
+  const watchMultiplexerLosses = watch('estimated_multiplexer_losses');
+  const watchSystemLosses = watch('estimated_system_losses');
+
+  // Get transmitter power from existing inspection data (Step 3)
+  // Priority: amplifier_actual_reading → fallback to exciter_actual_reading
+  const getTransmitterPower = () => {
+    const amplifierPower = existingInspection?.amplifier_actual_reading || formData.amplifier_actual_reading;
+    const exciterPower = existingInspection?.exciter_actual_reading || formData.exciter_actual_reading;
+    
+    if (amplifierPower && parseFloat(amplifierPower) > 0) {
+      return parseFloat(amplifierPower);
+    } else if (exciterPower && parseFloat(exciterPower) > 0) {
+      return parseFloat(exciterPower);
+    }
+    return 0;
+  };
+
+  // Calculate ERP automatically using the correct formula
+  useEffect(() => {
+    const calculateERP = () => {
+      try {
+        // Get transmitter power in Watts
+        const txPowerWatts = getTransmitterPower();
+        
+        // Get antenna gain in dBi
+        const antennaGain = parseFloat(watchAntennaGain) || 0;
+        
+        // Calculate total losses with priority logic
+        let totalLosses = 0;
+        
+        // Priority 1: Sum of individual losses (if any are provided)
+        const antennaLosses = parseFloat(watchAntennaLosses) || 0;
+        const feederLosses = parseFloat(watchFeederLosses) || 0;
+        const multiplexerLosses = parseFloat(watchMultiplexerLosses) || 0;
+        
+        const hasIndividualLosses = antennaLosses > 0 || feederLosses > 0 || multiplexerLosses > 0;
+        
+        if (hasIndividualLosses) {
+          // Use sum of individual losses
+          totalLosses = antennaLosses + feederLosses + multiplexerLosses;
+          console.log('Using individual losses:', { antennaLosses, feederLosses, multiplexerLosses, totalLosses });
+        } else {
+          // Fallback to system losses
+          totalLosses = parseFloat(watchSystemLosses) || 0;
+          console.log('Using system losses:', totalLosses);
+        }
+
+        // Only calculate if we have transmitter power
+        if (txPowerWatts <= 0) {
+          setValue('effective_radiated_power', '');
+          setValue('effective_radiated_power_dbw', '');
+          return;
+        }
+
+        // ERP Formula: ERP (dBW) = 10 log₁₀(P_watts) + Antenna Gain (dBi) - Total Losses (dB)
+        const txPowerDbw = 10 * Math.log10(txPowerWatts);
+        const erpDbw = txPowerDbw + antennaGain - totalLosses;
+        
+        // Convert ERP from dBW to kW: ERP (kW) = 10^(ERP_dBW/10) / 1000
+        const erpWatts = Math.pow(10, erpDbw / 10);
+        const erpKw = erpWatts / 1000;
+
+        // Update both fields
+        if (!isNaN(erpKw) && isFinite(erpKw) && erpKw > 0) {
+          setValue('effective_radiated_power_dbw', erpDbw.toFixed(2));
+          setValue('effective_radiated_power', erpKw.toFixed(3));
+        } else {
+          setValue('effective_radiated_power_dbw', '');
+          setValue('effective_radiated_power', '');
+        }
+
+        // Log calculation details for debugging
+        console.log('ERP Calculation Details:', {
+          txPowerWatts: txPowerWatts.toFixed(2),
+          txPowerDbw: txPowerDbw.toFixed(2),
+          antennaGain: antennaGain.toFixed(2),
+          totalLosses: totalLosses.toFixed(2),
+          erpDbw: erpDbw.toFixed(2),
+          erpWatts: erpWatts.toFixed(2),
+          erpKw: erpKw.toFixed(3)
+        });
+
+      } catch (error) {
+        console.error('ERP calculation error:', error);
+        setValue('effective_radiated_power', '');
+        setValue('effective_radiated_power_dbw', '');
+      }
+    };
+
+    calculateERP();
+  }, [
+    watchAntennaGain,
+    watchAntennaLosses,
+    watchFeederLosses,
+    watchMultiplexerLosses,
+    watchSystemLosses,
+    existingInspection,
+    formData,
+    setValue
+  ]);
+
+  // Auto-save mutation - FIXED TO PRESERVE PREVIOUS STEPS DATA
   const autoSaveMutation = useMutation({
     mutationFn: async (data) => {
       console.log('🔍 [Step4] Starting save with data:', data);
       
       try {
-        // Prepare inspection data with antenna fields - JUST LIKE STEP 1, 2 & 3
+        // FIXED: Only send Step 4 specific fields to avoid overwriting previous steps
         const inspectionData = {
-          status: 'draft',
-          inspection_date: new Date().toISOString().split('T')[0],
           // Add antenna fields directly to inspection record
           height_on_tower: data.height_on_tower || '',
           antenna_type: data.antenna_type || '',
-          manufacturer: data.manufacturer || '',
-          model_number: data.model_number || '',
+          antenna_manufacturer: data.antenna_manufacturer || '',
+          antenna_model_number: data.antenna_model_number || '',
           polarization: data.polarization || '',
           horizontal_pattern: data.horizontal_pattern || '',
           beam_width_3db: data.beam_width_3db || '',
@@ -132,7 +246,9 @@ const Step4 = () => {
           estimated_antenna_losses: data.estimated_antenna_losses || '',
           estimated_feeder_losses: data.estimated_feeder_losses || '',
           estimated_multiplexer_losses: data.estimated_multiplexer_losses || '',
+          estimated_system_losses: data.estimated_system_losses || '',
           effective_radiated_power: data.effective_radiated_power || '',
+          effective_radiated_power_dbw: data.effective_radiated_power_dbw || '',
           antenna_catalog_attached: data.antenna_catalog_attached || false,
           
           // Studio Link fields
@@ -141,6 +257,7 @@ const Step4 = () => {
           studio_serial_number: data.studio_serial_number || '',
           studio_frequency: data.studio_frequency || '',
           studio_polarization: data.studio_polarization || '',
+          stl_type: data.stl_type || '',
           signal_description: data.signal_description || '',
           
           // Final info fields
@@ -148,17 +265,14 @@ const Step4 = () => {
           other_observations: data.other_observations || '',
         };
 
-        // Keep existing broadcaster if available
-        if (existingInspection?.broadcaster) {
-          inspectionData.broadcaster = existingInspection.broadcaster;
-        }
+        // REMOVED: Don't send status, inspection_date, broadcaster, etc. to avoid overwriting
 
-        // Update inspection record - EXACT SAME AS STEP 1, 2 & 3
+        // Update inspection record - PARTIAL UPDATE ONLY
         let inspection;
         
         if (isEditing && inspectionId && inspectionId !== 'undefined') {
           console.log('📝 [Step4] Updating existing inspection:', inspectionId);
-          console.log('📝 [Step4] Update data:', inspectionData);
+          console.log('📝 [Step4] Update data (Step 4 fields only):', inspectionData);
           
           try {
             const response = await inspectionsAPI.update(inspectionId, inspectionData);
@@ -174,7 +288,14 @@ const Step4 = () => {
           console.log('🆕 [Step4] Create data:', inspectionData);
           
           try {
-            const response = await inspectionsAPI.create(inspectionData);
+            // For new inspections, we need basic required fields
+            const createData = {
+              ...inspectionData,
+              status: 'draft',
+              inspection_date: new Date().toISOString().split('T')[0],
+            };
+            
+            const response = await inspectionsAPI.create(createData);
             inspection = response.data;
             console.log('✅ [Step4] New inspection created:', inspection);
           } catch (createError) {
@@ -214,7 +335,7 @@ const Step4 = () => {
       setAutoSaveStatus('error');
       console.error('❌ [Step4] Auto-save failed:', error);
       
-      // Show user-friendly error messages - EXACT SAME AS STEP 1, 2 & 3
+      // Show user-friendly error messages
       if (error.code === 'ERR_NETWORK') {
         toast.error('Network error - check server connection');
       } else if (error.response?.status === 400) {
@@ -241,8 +362,8 @@ const Step4 = () => {
           // Include all the antenna and final data
           height_on_tower: data.height_on_tower || '',
           antenna_type: data.antenna_type || '',
-          manufacturer: data.manufacturer || '',
-          model_number: data.model_number || '',
+          antenna_manufacturer: data.antenna_manufacturer || '',
+          antenna_model_number: data.antenna_model_number || '',
           polarization: data.polarization || '',
           horizontal_pattern: data.horizontal_pattern || '',
           beam_width_3db: data.beam_width_3db || '',
@@ -259,13 +380,16 @@ const Step4 = () => {
           estimated_antenna_losses: data.estimated_antenna_losses || '',
           estimated_feeder_losses: data.estimated_feeder_losses || '',
           estimated_multiplexer_losses: data.estimated_multiplexer_losses || '',
+          estimated_system_losses: data.estimated_system_losses || '',
           effective_radiated_power: data.effective_radiated_power || '',
+          effective_radiated_power_dbw: data.effective_radiated_power_dbw || '',
           antenna_catalog_attached: data.antenna_catalog_attached || false,
           studio_manufacturer: data.studio_manufacturer || '',
           studio_model_number: data.studio_model_number || '',
           studio_serial_number: data.studio_serial_number || '',
           studio_frequency: data.studio_frequency || '',
           studio_polarization: data.studio_polarization || '',
+          stl_type: data.stl_type || '',
           signal_description: data.signal_description || '',
           technical_personnel: data.technical_personnel || '',
           other_observations: data.other_observations || '',
@@ -386,6 +510,21 @@ const Step4 = () => {
 
   const progress = 100; // Step 4 = 100%
 
+  // Helper function to display ERP with both units
+  const getERPDisplayValue = () => {
+    const erpKw = watch('effective_radiated_power');
+    const erpDbw = watch('effective_radiated_power_dbw');
+    
+    if (erpKw && erpDbw) {
+      return `${erpKw} kW (${erpDbw} dBW)`;
+    } else if (erpKw) {
+      return `${erpKw} kW`;
+    } else if (erpDbw) {
+      return `${erpDbw} dBW`;
+    }
+    return '';
+  };
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       {/* Header */}
@@ -453,7 +592,7 @@ const Step4 = () => {
                 <div>
                   <label className="form-label">Antenna Manufacturer</label>
                   <input
-                    {...register('manufacturer')}
+                    {...register('antenna_manufacturer')}
                     className="form-input"
                     placeholder="Manufacturer"
                   />
@@ -462,7 +601,7 @@ const Step4 = () => {
                 <div>
                   <label className="form-label">Antenna Model Number</label>
                   <input
-                    {...register('model_number')}
+                    {...register('antenna_model_number')}
                     className="form-input"
                     placeholder="Model number"
                   />
@@ -537,52 +676,6 @@ const Step4 = () => {
                         className="h-4 w-4 text-ca-blue focus:ring-ca-blue border-gray-300 rounded"
                       />
                       <label className="text-sm font-medium text-gray-700">
-                        Mechanical tilt?
-                      </label>
-                    </div>
-                    {watchHasMechanicalTilt && (
-                      <div>
-                        <label className="form-label">Degree of Tilt</label>
-                        <input
-                          {...register('mechanical_tilt_degree')}
-                          className="form-input"
-                          placeholder="Degrees"
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  <div>
-                    <div className="flex items-center space-x-3 mb-2">
-                      <input
-                        {...register('has_electrical_tilt')}
-                        type="checkbox"
-                        className="h-4 w-4 text-ca-blue focus:ring-ca-blue border-gray-300 rounded"
-                      />
-                      <label className="text-sm font-medium text-gray-700">
-                        Electrical tilt?
-                      </label>
-                    </div>
-                    {watchHasElectricalTilt && (
-                      <div>
-                        <label className="form-label">Degree of Tilt</label>
-                        <input
-                          {...register('electrical_tilt_degree')}
-                          className="form-input"
-                          placeholder="Degrees"
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  <div>
-                    <div className="flex items-center space-x-3 mb-2">
-                      <input
-                        {...register('has_null_fill')}
-                        type="checkbox"
-                        className="h-4 w-4 text-ca-blue focus:ring-ca-blue border-gray-300 rounded"
-                      />
-                      <label className="text-sm font-medium text-gray-700">
                         Null fill?
                       </label>
                     </div>
@@ -615,20 +708,38 @@ const Step4 = () => {
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="form-label">Gain of the Antenna System</label>
+                    <label className="form-label">Gain of the Antenna System (dBi)</label>
                     <input
                       {...register('antenna_gain')}
+                      type="number"
+                      step="0.01"
                       className="form-input"
-                      placeholder="Antenna gain"
+                      placeholder="Antenna gain in dBi"
                     />
+                  </div>
+
+                  <div>
+                    <label className="form-label">Estimated System Losses (dB)</label>
+                    <input
+                      {...register('estimated_system_losses')}
+                      type="number"
+                      step="0.01"
+                      className="form-input"
+                      placeholder="Total system losses in dB"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Use this field if you know the total system losses. Otherwise, use individual loss fields below.
+                    </p>
                   </div>
 
                   <div>
                     <label className="form-label">Estimated antenna losses (splitter, harnesses, null fill losses, etc) (dB)</label>
                     <input
                       {...register('estimated_antenna_losses')}
+                      type="number"
+                      step="0.01"
                       className="form-input"
-                      placeholder="Antenna losses"
+                      placeholder="Antenna losses in dB"
                     />
                   </div>
 
@@ -636,8 +747,10 @@ const Step4 = () => {
                     <label className="form-label">Estimated losses in the feeder (dB)</label>
                     <input
                       {...register('estimated_feeder_losses')}
+                      type="number"
+                      step="0.01"
                       className="form-input"
-                      placeholder="Feeder losses"
+                      placeholder="Feeder losses in dB"
                     />
                   </div>
 
@@ -645,22 +758,41 @@ const Step4 = () => {
                     <label className="form-label">Estimated losses in multiplexer (dB)</label>
                     <input
                       {...register('estimated_multiplexer_losses')}
+                      type="number"
+                      step="0.01"
                       className="form-input"
-                      placeholder="Multiplexer losses"
+                      placeholder="Multiplexer losses in dB"
                     />
                   </div>
                 </div>
 
-                <div>
-                  <label className="form-label">Effective Radiated Power (kW)</label>
+                <div className="mt-4">
+                  <label className="form-label">
+                    Effective Radiated Power 
+                    <span className="text-xs text-gray-500 ml-2">(Auto-calculated)</span>
+                  </label>
                   <input
-                    {...register('effective_radiated_power')}
-                    className="form-input"
-                    placeholder="Effective radiated power"
+                    value={getERPDisplayValue()}
+                    className="form-input bg-gray-50"
+                    placeholder="Calculated automatically"
+                    readOnly
                   />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Formula: ERP (dBW) = 10 log₁₀(P_watts) + Antenna Gain (dBi) - Total Losses (dB)
+                  </p>
+                  <p className="text-xs text-blue-600 mt-1">
+                    Power source: {getTransmitterPower() > 0 ? 
+                      (existingInspection?.amplifier_actual_reading ? 'Amplifier actual reading' : 'Exciter actual reading') : 
+                      'No power data available'
+                    }
+                  </p>
                 </div>
 
-                <div className="flex items-center space-x-3">
+                {/* Hidden fields to store individual ERP values */}
+                <input {...register('effective_radiated_power')} type="hidden" />
+                <input {...register('effective_radiated_power_dbw')} type="hidden" />
+
+                <div className="flex items-center space-x-3 mt-4">
                   <input
                     {...register('antenna_catalog_attached')}
                     type="checkbox"
@@ -682,7 +814,18 @@ const Step4 = () => {
           </div>
           <div className="card-body">
             <div className="mobile-form">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="form-label">Type of STL</label>
+                  <select {...register('stl_type')} className="form-input">
+                    {STL_TYPES.map(type => (
+                      <option key={type.value} value={type.value}>
+                        {type.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 <div>
                   <label className="form-label">Manufacturer</label>
                   <input
@@ -691,7 +834,9 @@ const Step4 = () => {
                     placeholder="Studio link manufacturer"
                   />
                 </div>
+              </div>
 
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="form-label">Model Number</label>
                   <input
@@ -709,9 +854,7 @@ const Step4 = () => {
                     placeholder="Serial number"
                   />
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="form-label">Frequency (MHz)</label>
                   <input
@@ -720,15 +863,15 @@ const Step4 = () => {
                     placeholder="Frequency"
                   />
                 </div>
+              </div>
 
-                <div>
-                  <label className="form-label">Polarization</label>
-                  <input
-                    {...register('studio_polarization')}
-                    className="form-input"
-                    placeholder="Polarization"
-                  />
-                </div>
+              <div>
+                <label className="form-label">Polarization</label>
+                <input
+                  {...register('studio_polarization')}
+                  className="form-input"
+                  placeholder="Polarization"
+                />
               </div>
 
               <div>

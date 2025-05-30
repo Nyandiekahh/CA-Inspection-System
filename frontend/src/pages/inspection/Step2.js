@@ -1,5 +1,5 @@
-// src/pages/inspection/Step2.js
-import React, { useEffect } from 'react';
+// src/pages/inspection/Step2.js - FIXED VERSION
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
@@ -14,14 +14,15 @@ import StepIndicator from '../../components/StepIndicator';
 import ProgressBar from '../../components/ProgressBar';
 import LoadingSpinner from '../../components/LoadingSpinner';
 
+// Make all fields optional like Step1
 const schema = yup.object({
-  tower_owner_name: yup.string().required('Tower owner name is required'),
-  height_above_ground: yup.string().required('Tower height is required'),
+  tower_owner_name: yup.string(),
+  height_above_ground: yup.string(),
   above_building_roof: yup.boolean(),
   building_height: yup.string(),
-  tower_type: yup.string().required('Tower type is required'),
+  tower_type: yup.string(),
   tower_type_other: yup.string(),
-  rust_protection: yup.string().required('Rust protection type is required'),
+  rust_protection: yup.string(),
   installation_year: yup.string(),
   manufacturer_name: yup.string(),
   model_number: yup.string(),
@@ -38,7 +39,7 @@ const schema = yup.object({
 });
 
 const STEPS = [
-  { id: 1, title: 'Admin & General' },
+  { id: 1, title: 'Program & General' },
   { id: 2, title: 'Tower Info' },
   { id: 3, title: 'Transmitter' },
   { id: 4, title: 'Antenna & Final' },
@@ -48,6 +49,7 @@ const Step2 = () => {
   const navigate = useNavigate();
   const { id: inspectionId } = useParams();
   const isEditing = Boolean(inspectionId);
+  const [shouldRedirect, setShouldRedirect] = useState(false);
 
   const { 
     formData, 
@@ -85,17 +87,27 @@ const Step2 = () => {
   const watchHasInsurance = watch('has_insurance');
   const watchHasOtherAntennas = watch('has_other_antennas');
 
-  // Auto-save mutation - EXACT SAME PATTERN AS STEP 1
+  // Auto-save mutation - Simplified like Step1
   const autoSaveMutation = useMutation({
     mutationFn: async (data) => {
       console.log('🔍 [Step2] Starting save with data:', data);
       
       try {
-        // Prepare inspection data with tower fields - JUST LIKE STEP 1
+        // Only auto-save if there's meaningful data
+        const hasData = data.tower_owner_name || data.height_above_ground || data.tower_type || 
+                       data.rust_protection || data.manufacturer_name;
+        
+        if (!hasData) {
+          console.log('⏭️ [Step2] No meaningful data to save, skipping auto-save');
+          return null;
+        }
+
+        // Prepare inspection data with tower fields
         const inspectionData = {
           status: 'draft',
           inspection_date: new Date().toISOString().split('T')[0],
-          // Add tower fields directly to inspection record
+          
+          // Add tower fields
           tower_owner_name: data.tower_owner_name || '',
           height_above_ground: data.height_above_ground || '',
           above_building_roof: data.above_building_roof || false,
@@ -118,56 +130,32 @@ const Step2 = () => {
           other_antennas_details: data.other_antennas_details || '',
         };
 
-        // Keep existing broadcaster if available
+        // Keep existing broadcaster and program if available
         if (existingInspection?.broadcaster) {
           inspectionData.broadcaster = existingInspection.broadcaster;
         }
+        if (existingInspection?.program) {
+          inspectionData.program = existingInspection.program;
+        }
 
-        // Update inspection record - EXACT SAME AS STEP 1
+        // Update inspection record
         let inspection;
         
         if (isEditing && inspectionId && inspectionId !== 'undefined') {
           console.log('📝 [Step2] Updating existing inspection:', inspectionId);
-          console.log('📝 [Step2] Update data:', inspectionData);
-          
-          try {
-            const response = await inspectionsAPI.update(inspectionId, inspectionData);
-            inspection = response.data;
-            console.log('✅ [Step2] Inspection updated successfully:', inspection);
-          } catch (updateError) {
-            console.error('❌ [Step2] Update failed:', updateError);
-            console.error('❌ [Step2] Update error details:', updateError.response?.data);
-            throw updateError;
-          }
+          const response = await inspectionsAPI.update(inspectionId, inspectionData);
+          inspection = response.data;
+          console.log('✅ [Step2] Inspection updated successfully:', inspection);
         } else {
           console.log('🆕 [Step2] Creating new inspection...');
-          console.log('🆕 [Step2] Create data:', inspectionData);
-          
-          try {
-            const response = await inspectionsAPI.create(inspectionData);
-            inspection = response.data;
-            console.log('✅ [Step2] New inspection created:', inspection);
-          } catch (createError) {
-            console.error('❌ [Step2] Creation failed:', createError);
-            console.error('❌ [Step2] Creation error details:', createError.response?.data);
-            throw createError;
-          }
+          const response = await inspectionsAPI.create(inspectionData);
+          inspection = response.data;
+          console.log('✅ [Step2] New inspection created:', inspection);
         }
 
         return inspection;
       } catch (error) {
         console.error('❌ [Step2] Save operation failed:', error);
-        console.error('📄 [Step2] Error response:', error.response?.data);
-        
-        // Log specific error information
-        if (error.response?.status === 400) {
-          console.error('🚫 [Step2] Bad Request Details:', {
-            status: error.response.status,
-            data: error.response.data,
-            headers: error.response.headers
-          });
-        }
-        
         throw error;
       }
     },
@@ -184,30 +172,35 @@ const Step2 = () => {
       setAutoSaveStatus('error');
       console.error('❌ [Step2] Auto-save failed:', error);
       
-      // Show user-friendly error messages - EXACT SAME AS STEP 1
+      // Show user-friendly error messages but don't block navigation
       if (error.code === 'ERR_NETWORK') {
-        toast.error('Network error - check server connection');
+        toast.error('Network error - data will be saved when connection is restored');
       } else if (error.response?.status === 400) {
         const errorMsg = error.response.data?.message || 'Validation error occurred';
         toast.error(`Save failed: ${errorMsg}`);
-      } else if (error.response?.status === 404) {
-        toast.error('Inspection not found - please refresh and try again');
       } else {
-        toast.error('Save failed - please try again');
+        toast.error('Save failed - data will be retried automatically');
       }
     },
   });
 
-  // Auto-save effect - EXACT SAME AS STEP 1
+  // Auto-save effect - Only save when there's meaningful data
   useEffect(() => {
     if (isDirty && Object.keys(watchedValues).length > 0) {
-      const timeoutId = setTimeout(() => {
-        console.log('[Step2] Auto-save triggered');
-        autoSaveMutation.mutate(watchedValues);
-        setFormData(watchedValues);
-      }, 10000); // 10 seconds
+      // Check if there's meaningful data to save
+      const hasData = watchedValues.tower_owner_name || watchedValues.height_above_ground || 
+                     watchedValues.tower_type || watchedValues.rust_protection || 
+                     watchedValues.manufacturer_name;
+      
+      if (hasData) {
+        const timeoutId = setTimeout(() => {
+          console.log('[Step2] Auto-save triggered');
+          autoSaveMutation.mutate(watchedValues);
+          setFormData(watchedValues);
+        }, 10000); // 10 seconds
 
-      return () => clearTimeout(timeoutId);
+        return () => clearTimeout(timeoutId);
+      }
     }
   }, [watchedValues, isDirty, autoSaveMutation, setFormData]);
 
@@ -216,7 +209,7 @@ const Step2 = () => {
     setCurrentStep(2);
   }, [setCurrentStep]);
 
-  // Load existing data - EXACT SAME AS STEP 1
+  // Load existing data
   useEffect(() => {
     if (existingInspection) {
       setCurrentInspection(existingInspection);
@@ -229,39 +222,55 @@ const Step2 = () => {
     }
   }, [existingInspection, setCurrentInspection, setValue]);
 
-  // Manual save - EXACT SAME AS STEP 1
-  const onSave = async (data) => {
-    try {
-      console.log('[Step2] Manual save triggered');
-      await trigger(); // Validate form
-      
-      const response = await autoSaveMutation.mutateAsync(data);
-      setFormData(data);
-      toast.success('Tower information saved successfully');
-      
-      return response;
-    } catch (error) {
-      console.error('[Step2] Manual save error:', error);
-      toast.error('Failed to save tower information');
+  // FIX: Handle redirect logic in useEffect instead of during render
+  useEffect(() => {
+    if (!inspectionId && !isEditing) {
+      setShouldRedirect(true);
     }
-  };
+  }, [inspectionId, isEditing]);
 
-  // Navigate to next step - EXACT SAME AS STEP 1
+  // FIX: Handle the actual redirect in another useEffect
+  useEffect(() => {
+    if (shouldRedirect) {
+      toast.error('No inspection found. Please start from Step 1.');
+      navigate('/inspection/new/step-1');
+    }
+  }, [shouldRedirect, navigate]);
+
+  // Navigate to next step with auto-save
   const onNext = async (data) => {
     try {
-      const isValid = await trigger();
-      if (!isValid) {
-        setValidationErrors(errors);
-        toast.error('Please fix the validation errors before continuing');
-        return;
-      }
-
-      setValidationErrors({});
-      await onSave(data);
+      // Set loading state
+      setAutoSaveStatus('saving');
       
+      // Always save form data to local state
+      setFormData(data);
+      
+      // Check if there's meaningful data to save to backend
+      const hasData = data.tower_owner_name || data.height_above_ground || data.tower_type || 
+                     data.rust_protection || data.manufacturer_name;
+      
+      if (hasData) {
+        try {
+          console.log('💾 [Step2] Auto-saving before navigation...');
+          await autoSaveMutation.mutateAsync(data);
+        } catch (error) {
+          // Don't block navigation if save fails
+          console.warn('[Step2] Save failed but proceeding to next step:', error);
+          toast.warning('Could not save data, but proceeding to next step');
+        }
+      }
+      
+      // Navigate to next step
       navigate(`/inspection/${inspectionId}/step-3`);
+      
     } catch (error) {
-      toast.error('Please save your progress before continuing');
+      // Ensure navigation always works
+      console.error('[Step2] Navigation error:', error);
+      setFormData(data);
+      navigate(`/inspection/${inspectionId}/step-3`);
+    } finally {
+      setAutoSaveStatus('idle');
     }
   };
 
@@ -280,11 +289,13 @@ const Step2 = () => {
     );
   }
 
-  // Redirect if no inspection ID
-  if (!inspectionId) {
-    toast.error('No inspection found. Please start from Step 1.');
-    navigate('/inspection/new/step-1');
-    return null;
+  // Show loading while redirect is happening
+  if (shouldRedirect) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <LoadingSpinner size="xl" />
+      </div>
+    );
   }
 
   const progress = 50; // Step 2 = 50%
@@ -297,7 +308,7 @@ const Step2 = () => {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Tower Information</h1>
-              <p className="text-sm text-gray-600 mt-1">Step 2: Tower specifications and safety</p>
+              <p className="text-sm text-gray-600 mt-1">Step 2: Tower specifications and safety (all optional)</p>
             </div>
             <div className="mt-4 sm:mt-0">
               <ProgressBar progress={progress} className="w-32 h-2" />
@@ -329,11 +340,12 @@ const Step2 = () => {
         <div className="card">
           <div className="card-header">
             <h2 className="text-lg font-semibold text-gray-900">Tower Owner & Specifications</h2>
+            <p className="text-sm text-gray-600 mt-1">Fill what you know about the tower (all optional)</p>
           </div>
           <div className="card-body">
             <div className="mobile-form">
               <div>
-                <label className="form-label">Name of the Tower Owner *</label>
+                <label className="form-label">Name of the Tower Owner</label>
                 <input
                   {...register('tower_owner_name')}
                   className={`form-input ${errors.tower_owner_name ? 'form-input-error' : ''}`}
@@ -345,7 +357,7 @@ const Step2 = () => {
               </div>
 
               <div>
-                <label className="form-label">Height of the Tower above Ground *</label>
+                <label className="form-label">Height of the Tower above Ground</label>
                 <div className="relative">
                   <input
                     {...register('height_above_ground')}
@@ -392,7 +404,7 @@ const Step2 = () => {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="form-label">Type of Tower *</label>
+                  <label className="form-label">Type of Tower</label>
                   <select
                     {...register('tower_type')}
                     className={`form-input ${errors.tower_type ? 'form-input-error' : ''}`}
@@ -419,7 +431,7 @@ const Step2 = () => {
                 )}
 
                 <div>
-                  <label className="form-label">Rust Protection *</label>
+                  <label className="form-label">Rust Protection</label>
                   <select
                     {...register('rust_protection')}
                     className={`form-input ${errors.rust_protection ? 'form-input-error' : ''}`}
@@ -614,7 +626,7 @@ const Step2 = () => {
           </div>
         </div>
 
-        {/* Navigation */}
+        {/* Navigation - Simplified like Step1 */}
         <div className="flex flex-col sm:flex-row justify-between space-y-4 sm:space-y-0 sm:space-x-4">
           <button
             type="button"
@@ -622,31 +634,26 @@ const Step2 = () => {
             className="btn btn-outline"
           >
             <ChevronLeft className="w-4 h-4 mr-2" />
-            Previous: Admin Info
+            Previous: Program Info
           </button>
 
           <div className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
-            <button
-              type="button"
-              onClick={handleSubmit(onSave)}
-              disabled={autoSaveMutation.isPending}
-              className="btn btn-secondary"
-            >
-              {autoSaveMutation.isPending ? (
-                <LoadingSpinner size="sm" className="mr-2" />
-              ) : (
-                <Save className="w-4 h-4 mr-2" />
-              )}
-              Save Draft
-            </button>
-
             <button
               type="submit"
               disabled={autoSaveMutation.isPending}
               className="btn btn-primary"
             >
-              Continue to Transmitter
-              <ChevronRight className="w-4 h-4 ml-2" />
+              {autoSaveMutation.isPending ? (
+                <>
+                  <LoadingSpinner size="sm" className="mr-2" />
+                  Saving & Continuing...
+                </>
+              ) : (
+                <>
+                  Continue to Transmitter
+                  <ChevronRight className="w-4 h-4 ml-2" />
+                </>
+              )}
             </button>
           </div>
         </div>

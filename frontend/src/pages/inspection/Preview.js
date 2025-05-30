@@ -1,4 +1,4 @@
-// src/pages/inspection/Preview.js
+// src/pages/inspection/Preview.js - COMPLETE FIXED VERSION
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -81,6 +81,26 @@ const Preview = () => {
     );
   };
 
+  // Air Status badge component - NEW
+  const AirStatusBadge = ({ status }) => {
+    if (status === 'off_air') {
+      return (
+        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+          <div className="w-2 h-2 bg-red-500 rounded-full mr-2"></div>
+          OFF AIR
+        </span>
+      );
+    } else if (status === 'on_air') {
+      return (
+        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+          <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
+          ON AIR
+        </span>
+      );
+    }
+    return <span className="text-gray-400 italic">Not specified</span>;
+  };
+
   // Field display component
   const Field = ({ label, value, className = '' }) => (
     <div className={className}>
@@ -159,6 +179,22 @@ const Preview = () => {
           <h2 className="text-lg font-semibold text-blue-700">Step 1: Administrative Information & General Data</h2>
         </Card.Header>
         <Card.Body>
+          {/* ADDED: Program Information Section */}
+          <div className="mb-8">
+            <h3 className="text-base font-semibold text-gray-900 mb-4 border-b border-gray-200 pb-2">
+              Program Information
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <Field label="Program Name" value={inspection.program_name} />
+              <Field label="Air Status" value={<AirStatusBadge status={inspection.air_status} />} />
+              {inspection.air_status === 'off_air' && (
+                <div className="col-span-full">
+                  <Field label="Reason for being OFF AIR" value={inspection.off_air_reason} />
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Broadcaster Details */}
           <div className="mb-8">
             <h3 className="text-base font-semibold text-gray-900 mb-4 border-b border-gray-200 pb-2">
@@ -410,6 +446,7 @@ const Preview = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <Field label="Height on Tower/Mast (m)" value={inspection.height_on_tower} />
               <Field label="Antenna Type" value={inspection.antenna_type} />
+              {/* FIXED: Use correct field names from model */}
               <Field label="Antenna Manufacturer" value={inspection.antenna_manufacturer} />
               <Field label="Antenna Model Number" value={inspection.antenna_model_number} />
               <Field label="Polarization" value={inspection.polarization} />

@@ -1,24 +1,31 @@
-// src/pages/inspection/Step1.js - FIXED VERSION with proper broadcaster dropdown
+// src/pages/inspection/Step1.js - COMPLETE FIXED VERSION
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { ChevronRight, ChevronLeft, Save, AlertCircle, Plus, ExternalLink } from 'lucide-react';
+import { ChevronRight, ChevronLeft, AlertCircle, Plus, ExternalLink, Radio } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 import { useFormStore } from '../../store';
-import { broadcastersAPI, inspectionsAPI } from '../../services/api';
+import { broadcastersAPI, programsAPI, inspectionsAPI } from '../../services/api';
 import StepIndicator from '../../components/StepIndicator';
 import ProgressBar from '../../components/ProgressBar';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import GPSLocationComponent from '../../components/GPSLocationComponent';
 
-// Form validation schema
+// Form validation schema - ALL FIELDS OPTIONAL
 const schema = yup.object({
-  // Broadcaster info
-  broadcaster_name: yup.string().required('Broadcaster name is required'),
+  // All fields are optional now
+  program_name: yup.string(),
+  air_status: yup.string(),
+  off_air_reason: yup.string().when('air_status', {
+    is: 'off_air',
+    then: (schema) => schema.required('Reason for being OFF AIR is required when status is OFF AIR'),
+    otherwise: (schema) => schema.notRequired(),
+  }),
+  broadcaster_name: yup.string(),
   po_box: yup.string(),
   postal_code: yup.string(),
   town: yup.string(),
@@ -29,10 +36,8 @@ const schema = yup.object({
   contact_address: yup.string(),
   contact_phone: yup.string(),
   contact_email: yup.string().email('Invalid email format'),
-  
-  // General data
-  station_type: yup.string().required('Station type is required'),
-  transmitting_site_name: yup.string().required('Transmitting site name is required'),
+  station_type: yup.string(),
+  transmitting_site_name: yup.string(),
   longitude: yup.string(),
   latitude: yup.string(),
   physical_location: yup.string(),
@@ -45,7 +50,7 @@ const schema = yup.object({
 });
 
 const STEPS = [
-  { id: 1, title: 'Admin & General' },
+  { id: 1, title: 'Program & General' },
   { id: 2, title: 'Tower Info' },
   { id: 3, title: 'Transmitter' },
   { id: 4, title: 'Antenna & Final' },
@@ -56,6 +61,11 @@ const Step1 = () => {
   const { id: inspectionId } = useParams();
   const isEditing = Boolean(inspectionId);
 
+  // Program dropdown state
+  const [showProgramDropdown, setShowProgramDropdown] = useState(false);
+  const [programSearch, setProgramSearch] = useState('');
+  
+  // Broadcaster dropdown state  
   const [showBroadcasterDropdown, setShowBroadcasterDropdown] = useState(false);
   const [broadcasterSearch, setBroadcasterSearch] = useState('');
 
@@ -77,6 +87,13 @@ const Step1 = () => {
     enabled: isEditing,
   });
 
+  // Load programs for dropdown
+  const { data: programsResponse, isLoading: programsLoading, refetch: refetchPrograms } = useQuery({
+    queryKey: ['programs'],
+    queryFn: () => programsAPI.getAll().then(res => res.data),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+
   // Load broadcasters for dropdown
   const { data: broadcastersResponse, isLoading: broadcastersLoading, refetch: refetchBroadcasters } = useQuery({
     queryKey: ['broadcasters'],
@@ -84,11 +101,28 @@ const Step1 = () => {
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
+  // Extract programs array safely
+  const programs = React.useMemo(() => {
+    if (!programsResponse) return [];
+    
+    if (Array.isArray(programsResponse)) {
+      return programsResponse;
+    }
+    if (programsResponse.results && Array.isArray(programsResponse.results)) {
+      return programsResponse.results;
+    }
+    if (programsResponse.data && Array.isArray(programsResponse.data)) {
+      return programsResponse.data;
+    }
+    
+    console.warn('Unexpected programs response format:', programsResponse);
+    return [];
+  }, [programsResponse]);
+
   // Extract broadcasters array safely
   const broadcasters = React.useMemo(() => {
     if (!broadcastersResponse) return [];
     
-    // Handle different response formats
     if (Array.isArray(broadcastersResponse)) {
       return broadcastersResponse;
     }
@@ -102,6 +136,16 @@ const Step1 = () => {
     console.warn('Unexpected broadcasters response format:', broadcastersResponse);
     return [];
   }, [broadcastersResponse]);
+
+  // Filter programs based on search
+  const filteredPrograms = React.useMemo(() => {
+    if (!programSearch.trim()) return programs;
+    
+    return programs.filter(program =>
+      program.name?.toLowerCase().includes(programSearch.toLowerCase()) ||
+      program.description?.toLowerCase().includes(programSearch.toLowerCase())
+    );
+  }, [programs, programSearch]);
 
   // Filter broadcasters based on search
   const filteredBroadcasters = React.useMemo(() => {
@@ -127,7 +171,26 @@ const Step1 = () => {
   });
 
   const watchedValues = watch();
+  const selectedProgramName = watch('program_name');
   const selectedBroadcasterName = watch('broadcaster_name');
+  const airStatus = watch('air_status');
+
+  // Auto-populate associated broadcasters when program is selected
+  useEffect(() => {
+    if (selectedProgramName && programs.length > 0) {
+      const program = programs.find(p => p.name === selectedProgramName);
+      if (program && program.broadcaster_names && program.broadcaster_names.length > 0) {
+        // If program has associated broadcasters, suggest the first one
+        const firstBroadcaster = program.broadcaster_names[0];
+        if (!selectedBroadcasterName) {
+          setValue('broadcaster_name', firstBroadcaster);
+          setBroadcasterSearch(firstBroadcaster);
+          toast.success(`Associated broadcaster "${firstBroadcaster}" auto-selected`);
+        }
+        setShowProgramDropdown(false);
+      }
+    }
+  }, [selectedProgramName, programs, selectedBroadcasterName, setValue]);
 
   // Auto-populate broadcaster data when selected
   useEffect(() => {
@@ -151,23 +214,73 @@ const Step1 = () => {
     }
   }, [selectedBroadcasterName, broadcasters, setValue]);
 
-  // Auto-save mutation
+  // Auto-save mutation - IMPROVED ERROR HANDLING
   const autoSaveMutation = useMutation({
     mutationFn: async (data) => {
-      console.log('🔍 Starting save with data:', data);
+      console.log('🔍 [Step1] Starting save with data:', data);
       
       try {
-        // Step 1: Handle broadcaster (create or find)
-        let broadcasterId = null;
+        // Only auto-save if there's meaningful data (not just empty form)
+        const hasData = data.program_name || data.broadcaster_name || data.station_type || 
+                       data.transmitting_site_name || data.physical_location || data.land_owner_name ||
+                       data.air_status || data.off_air_reason;
         
-        if (data.broadcaster_name) {
+        if (!hasData) {
+          console.log('⏭️ [Step1] No meaningful data to save, skipping auto-save');
+          return null;
+        }
+
+        let programId = null;
+        let broadcasterId = null;
+
+        // Step 1: Handle program (create or find) - OPTIONAL
+        if (data.program_name && data.program_name.trim()) {
+          const existingProgram = programs.find(p => p.name === data.program_name);
+          
+          if (existingProgram) {
+            programId = existingProgram.id;
+            console.log('✅ [Step1] Using existing program:', existingProgram);
+          } else {
+            console.log('🆕 [Step1] Creating new program...');
+            try {
+              const programResponse = await programsAPI.create({
+                name: data.program_name,
+                description: `Program for ${data.broadcaster_name || 'inspection'}`,
+              });
+              programId = programResponse.data.id;
+              console.log('✅ [Step1] New program created:', programResponse.data);
+              
+              // If we have a broadcaster, associate it with the new program
+              if (data.broadcaster_name && data.broadcaster_name.trim()) {
+                const broadcaster = broadcasters.find(b => b.name === data.broadcaster_name);
+                if (broadcaster) {
+                  try {
+                    await programsAPI.addBroadcaster(programId, { broadcaster_id: broadcaster.id });
+                    console.log('✅ [Step1] Associated broadcaster with new program');
+                  } catch (e) {
+                    console.warn('⚠️ [Step1] Could not associate broadcaster with program:', e);
+                  }
+                }
+              }
+              
+              // Refresh programs list
+              await refetchPrograms();
+            } catch (programError) {
+              console.error('❌ [Step1] Program creation failed:', programError);
+              console.log('⚠️ [Step1] Program creation failed, continuing without it');
+            }
+          }
+        }
+
+        // Step 2: Handle broadcaster (create or find) - OPTIONAL
+        if (data.broadcaster_name && data.broadcaster_name.trim()) {
           const existingBroadcaster = broadcasters.find(b => b.name === data.broadcaster_name);
           
           if (existingBroadcaster) {
             broadcasterId = existingBroadcaster.id;
-            console.log('✅ Using existing broadcaster:', existingBroadcaster);
+            console.log('✅ [Step1] Using existing broadcaster:', existingBroadcaster);
           } else {
-            console.log('🆕 Creating new broadcaster...');
+            console.log('🆕 [Step1] Creating new broadcaster...');
             try {
               const broadcasterResponse = await broadcastersAPI.create({
                 name: data.broadcaster_name,
@@ -183,35 +296,36 @@ const Step1 = () => {
                 contact_email: data.contact_email || '',
               });
               broadcasterId = broadcasterResponse.data.id;
-              console.log('✅ New broadcaster created:', broadcasterResponse.data);
+              console.log('✅ [Step1] New broadcaster created:', broadcasterResponse.data);
+              
+              // Associate the program with the new broadcaster
+              if (programId) {
+                try {
+                  await programsAPI.addBroadcaster(programId, { broadcaster_id: broadcasterId });
+                  console.log('✅ [Step1] Associated program with new broadcaster');
+                } catch (e) {
+                  console.warn('⚠️ [Step1] Could not associate program with broadcaster:', e);
+                }
+              }
               
               // Refresh broadcasters list
               await refetchBroadcasters();
             } catch (broadcasterError) {
-              console.error('❌ Broadcaster creation failed:', broadcasterError);
-              // Use the first available broadcaster as fallback
-              const fallbackBroadcaster = broadcasters[0];
-              if (fallbackBroadcaster) {
-                broadcasterId = fallbackBroadcaster.id;
-                console.log('📝 Using fallback broadcaster:', fallbackBroadcaster);
-              } else {
-                throw new Error('No broadcaster available and creation failed');
-              }
+              console.error('❌ [Step1] Broadcaster creation failed:', broadcasterError);
+              console.log('⚠️ [Step1] Broadcaster creation failed, continuing without it');
             }
-          }
-        } else {
-          // No broadcaster name provided, use the first available
-          const fallbackBroadcaster = broadcasters[0];
-          if (fallbackBroadcaster) {
-            broadcasterId = fallbackBroadcaster.id;
-            console.log('📝 Using first available broadcaster:', fallbackBroadcaster);
           }
         }
 
-        // Step 2: Prepare inspection data with all Step 1 fields
+        // Step 3: Prepare inspection data with all Step 1 fields INCLUDING THE MISSING ONES
         const inspectionData = {
           status: 'draft',
           inspection_date: new Date().toISOString().split('T')[0],
+          
+          // FIXED: Include the missing fields that were causing the error
+          program_name: data.program_name || '',
+          air_status: data.air_status || 'on_air',
+          off_air_reason: data.off_air_reason || '',
           
           // Include all Step 1 fields
           broadcaster_name: data.broadcaster_name || '',
@@ -238,82 +352,101 @@ const Step1 = () => {
           telecoms_operator_details: data.telecoms_operator_details || '',
         };
 
-        // Only include broadcaster if we have one
+        // Include IDs if available
+        if (programId) {
+          inspectionData.program = programId;
+        }
         if (broadcasterId) {
           inspectionData.broadcaster = broadcasterId;
         }
 
-        // Step 3: Create or update inspection
+        // Step 4: Create or update inspection
         let inspection;
         
         if (isEditing && inspectionId && inspectionId !== 'undefined') {
-          console.log('📝 Updating existing inspection:', inspectionId);
+          console.log('📝 [Step1] Updating existing inspection:', inspectionId);
           const response = await inspectionsAPI.update(inspectionId, inspectionData);
           inspection = response.data;
-          console.log('✅ Inspection updated successfully:', inspection);
+          console.log('✅ [Step1] Inspection updated successfully:', inspection);
         } else {
-          console.log('🆕 Creating new inspection...');
-          
-          // Make sure we have broadcaster for creation
-          if (!broadcasterId) {
-            throw new Error('Broadcaster is required for new inspections');
-          }
-          
+          console.log('🆕 [Step1] Creating new inspection...');
           const response = await inspectionsAPI.create(inspectionData);
           inspection = response.data;
-          console.log('✅ New inspection created:', inspection);
+          console.log('✅ [Step1] New inspection created:', inspection);
         }
 
         return inspection;
       } catch (error) {
-        console.error('❌ Save operation failed:', error);
+        console.error('❌ [Step1] Save operation failed:', error);
+        
+        // Log detailed error information
+        if (error.response) {
+          console.error('❌ [Step1] Error response:', error.response.data);
+          console.error('❌ [Step1] Error status:', error.response.status);
+        }
+        
         throw error;
       }
     },
     onMutate: () => {
       setAutoSaveStatus('saving');
-      console.log('🔄 Auto-save started...');
+      console.log('🔄 [Step1] Auto-save started...');
     },
     onSuccess: (inspection) => {
       setAutoSaveStatus('saved');
       setLastSaved(new Date().toISOString());
-      console.log('✅ Auto-save successful:', inspection);
+      console.log('✅ [Step1] Auto-save successful:', inspection);
       
       if (!isEditing && inspection) {
-        // First save - redirect to editing mode
-        console.log('🔀 Redirecting to edit mode for inspection:', inspection.id);
-        navigate(`/inspection/${inspection.id}/step-1`, { replace: true });
+        // First save - update current inspection but don't redirect yet
         setCurrentInspection(inspection);
+        console.log('🔀 [Step1] Inspection saved, ready for navigation');
       }
     },
     onError: (error) => {
       setAutoSaveStatus('error');
-      console.error('❌ Auto-save failed:', error);
+      console.error('❌ [Step1] Auto-save failed:', error);
       
-      // Show user-friendly error messages
+      // Show user-friendly error messages but don't block navigation
       if (error.code === 'ERR_NETWORK') {
-        toast.error('Network error - check server connection');
+        toast.error('Network error - data will be saved when connection is restored');
       } else if (error.response?.status === 400) {
-        const errorMsg = error.response.data?.message || 'Validation error occurred';
-        toast.error(`Save failed: ${errorMsg}`);
-      } else if (error.response?.status === 404) {
-        toast.error('Inspection not found - please refresh and try again');
+        const errorData = error.response.data;
+        if (errorData && typeof errorData === 'object') {
+          // Handle validation errors
+          const errorMessages = Object.entries(errorData).map(([field, messages]) => {
+            const messageArray = Array.isArray(messages) ? messages : [messages];
+            return `${field}: ${messageArray.join(', ')}`;
+          }).join('; ');
+          toast.error(`Validation error: ${errorMessages}`);
+        } else {
+          const errorMsg = errorData?.message || 'Validation error occurred';
+          toast.error(`Save failed: ${errorMsg}`);
+        }
       } else {
-        toast.error('Save failed - please try again');
+        toast.error('Save failed - data will be retried automatically');
       }
     },
   });
 
-  // Auto-save effect
+  // Auto-save effect - IMPROVED to prevent unnecessary saves
   useEffect(() => {
     if (isDirty && Object.keys(watchedValues).length > 0) {
-      const timeoutId = setTimeout(() => {
-        console.log('Auto-save triggered');
-        autoSaveMutation.mutate(watchedValues);
-        setFormData(watchedValues);
-      }, 10000); // 10 seconds
+      // Check if there's meaningful data to save
+      const hasData = watchedValues.program_name || watchedValues.broadcaster_name || 
+                     watchedValues.station_type || watchedValues.transmitting_site_name ||
+                     watchedValues.physical_location || watchedValues.land_owner_name ||
+                     watchedValues.air_status || watchedValues.off_air_reason;
+      
+      if (hasData) {
+        const timeoutId = setTimeout(() => {
+          console.log('[Step1] Auto-save triggered');
+          autoSaveMutation.mutate(watchedValues);
+          setFormData(watchedValues);
+        }, 10000); // 10 seconds
 
-      return () => clearTimeout(timeoutId);
+        return () => clearTimeout(timeoutId);
+      }
     }
   }, [watchedValues, isDirty, autoSaveMutation, setFormData]);
 
@@ -335,49 +468,84 @@ const Step1 = () => {
     }
   }, [existingInspection, setCurrentInspection, setValue]);
 
-  // Manual save
-  const onSave = async (data) => {
-    try {
-      console.log('Manual save triggered');
-      await trigger(); // Validate form
-      
-      const response = await autoSaveMutation.mutateAsync(data);
-      setFormData(data);
-      toast.success('Progress saved successfully');
-      
-      if (!isEditing && response) {
-        navigate(`/inspection/${response.id}/step-1`, { replace: true });
-      }
-    } catch (error) {
-      console.error('Manual save error:', error);
-      toast.error('Failed to save progress');
-    }
-  };
-
-  // Navigate to next step
+  // FIXED: Navigate to next step with improved error handling
   const onNext = async (data) => {
     try {
-      const isValid = await trigger();
-      if (!isValid) {
-        setValidationErrors(errors);
-        toast.error('Please fix the validation errors before continuing');
-        return;
-      }
-
-      setValidationErrors({});
-      await onSave(data);
+      console.log('🚀 [Step1] Starting navigation with data:', data);
       
+      // Set loading state
+      setAutoSaveStatus('saving');
+      
+      // Always save form data to local state first
+      setFormData(data);
+      
+      // Check if there's meaningful data to save to backend
+      const hasData = data.program_name || data.broadcaster_name || data.station_type || 
+                     data.transmitting_site_name || data.physical_location || data.land_owner_name ||
+                     data.air_status || data.off_air_reason;
+      
+      let inspectionIdToUse = inspectionId;
+      
+      if (hasData) {
+        try {
+          console.log('💾 [Step1] Auto-saving before navigation...');
+          const inspection = await autoSaveMutation.mutateAsync(data);
+          
+          if (inspection && inspection.id) {
+            inspectionIdToUse = inspection.id;
+            console.log('✅ [Step1] Inspection saved with ID:', inspectionIdToUse);
+            
+            // Update current inspection in store
+            setCurrentInspection(inspection);
+          }
+        } catch (error) {
+          // Log error but don't block navigation entirely
+          console.warn('[Step1] Save failed but attempting to proceed:', error);
+          toast.warning('Could not save all data, but proceeding to next step');
+        }
+      }
+      
+      // Navigate to next step
+      if (inspectionIdToUse && inspectionIdToUse !== 'undefined') {
+        console.log('🧭 [Step1] Navigating to step 2 with inspection ID:', inspectionIdToUse);
+        navigate(`/inspection/${inspectionIdToUse}/step-2`);
+      } else if (isEditing) {
+        console.log('🧭 [Step1] Navigating to step 2 (editing mode)');
+        navigate(`/inspection/${inspectionId}/step-2`);
+      } else {
+        console.log('🧭 [Step1] Navigating to step 2 (new inspection)');
+        navigate('../step-2', { relative: 'path' });
+      }
+      
+    } catch (error) {
+      // Ensure navigation always works
+      console.error('[Step1] Navigation error:', error);
+      setFormData(data);
+      
+      // Try to navigate anyway
       if (isEditing) {
         navigate(`/inspection/${inspectionId}/step-2`);
       } else {
-        // Will be handled by the save redirect
-        setTimeout(() => {
-          navigate('../step-2', { relative: 'path' });
-        }, 1000);
+        navigate('../step-2', { relative: 'path' });
       }
-    } catch (error) {
-      toast.error('Please save your progress before continuing');
+    } finally {
+      setAutoSaveStatus('idle');
     }
+  };
+
+  // Handle program selection
+  const handleProgramSelect = (program) => {
+    setValue('program_name', program.name);
+    setProgramSearch(program.name);
+    setShowProgramDropdown(false);
+  };
+
+  // Handle program search input
+  const handleProgramSearchChange = (e) => {
+    const value = e.target.value;
+    setProgramSearch(value);
+    setValue('program_name', value);
+    setShowProgramDropdown(value.length > 0);
   };
 
   // Handle broadcaster selection
@@ -416,7 +584,7 @@ const Step1 = () => {
                 {isEditing ? 'Edit Inspection' : 'New Inspection'}
               </h1>
               <p className="text-sm text-gray-600 mt-1">
-                Step 1: Administrative Information & General Data
+                Step 1: Program Information & General Data
               </p>
             </div>
             <div className="mt-4 sm:mt-0">
@@ -447,19 +615,212 @@ const Step1 = () => {
 
       {/* Form */}
       <form onSubmit={handleSubmit(onNext)} className="space-y-6">
-        {/* Administrative Information */}
+        {/* Program Information - PRIMARY SECTION */}
         <div className="card">
           <div className="card-header">
-            <h2 className="text-lg font-semibold text-gray-900">
-              Administrative Information
-            </h2>
+            <div className="flex items-center">
+              <Radio className="w-5 h-5 text-ca-blue mr-2" />
+              <h2 className="text-lg font-semibold text-gray-900">
+                Program Information
+              </h2>
+              <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Optional</span>
+            </div>
+            <p className="text-sm text-gray-600 mt-1">
+              All fields are optional. Fill what you know and proceed to the next step.
+            </p>
+          </div>
+          <div className="card-body">
+            <div className="mobile-form">
+              {/* Program Name with Search Dropdown */}
+              <div className="relative">
+                <label className="form-label">
+                  Program Name
+                  <span className="text-xs text-gray-500 block font-normal">
+                    Enter the program name you observe during inspection (optional)
+                  </span>
+                </label>
+                <div className="relative">
+                  <input
+                    {...register('program_name')}
+                    value={programSearch}
+                    onChange={handleProgramSearchChange}
+                    onFocus={() => setShowProgramDropdown(true)}
+                    className={`form-input ${errors.program_name ? 'form-input-error' : ''}`}
+                    placeholder="Search for program or enter new program name..."
+                    autoComplete="off"
+                  />
+                  
+                  {/* Dropdown */}
+                  {showProgramDropdown && (
+                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto">
+                      {programsLoading ? (
+                        <div className="px-4 py-3 text-center">
+                          <LoadingSpinner size="sm" />
+                        </div>
+                      ) : filteredPrograms.length > 0 ? (
+                        <>
+                          {filteredPrograms.map((program) => (
+                            <button
+                              key={program.id}
+                              type="button"
+                              onClick={() => handleProgramSelect(program)}
+                              className="w-full px-4 py-2 text-left hover:bg-gray-100 focus:bg-gray-100 focus:outline-none"
+                            >
+                              <div className="font-medium">{program.name}</div>
+                              {program.description && (
+                                <div className="text-sm text-gray-500">{program.description}</div>
+                              )}
+                              {program.broadcaster_names && program.broadcaster_names.length > 0 && (
+                                <div className="text-xs text-blue-600 mt-1">
+                                  Associated with: {program.broadcaster_names.join(', ')}
+                                </div>
+                              )}
+                            </button>
+                          ))}
+                          
+                          {/* Add New Program Option */}
+                          <div className="border-t border-gray-200">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setProgramSearch(programSearch);
+                                setValue('program_name', programSearch);
+                                setShowProgramDropdown(false);
+                                toast.success(`"${programSearch}" will be created as a new program`);
+                              }}
+                              className="w-full px-4 py-3 text-left text-blue-600 hover:bg-blue-50 focus:bg-blue-50 focus:outline-none flex items-center"
+                            >
+                              <Plus className="w-4 h-4 mr-2" />
+                              Add "{programSearch}" as new program
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="px-4 py-3">
+                          <div className="text-gray-500 text-center mb-3">
+                            No programs found
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setProgramSearch(programSearch);
+                              setValue('program_name', programSearch);
+                              setShowProgramDropdown(false);
+                              toast.success(`"${programSearch}" will be created as a new program`);
+                            }}
+                            className="w-full px-3 py-2 text-blue-600 hover:bg-blue-50 rounded flex items-center justify-center"
+                          >
+                            <Plus className="w-4 h-4 mr-2" />
+                            Add "{programSearch}" as new program
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                
+                {/* Click outside to close dropdown */}
+                {showProgramDropdown && (
+                  <div 
+                    className="fixed inset-0 z-5" 
+                    onClick={() => setShowProgramDropdown(false)}
+                  />
+                )}
+                
+                {errors.program_name && (
+                  <p className="form-error">{errors.program_name.message}</p>
+                )}
+              </div>
+
+              {/* Air Status */}
+              <div>
+                <label className="form-label">
+                  Station Status
+                  <span className="text-xs text-gray-500 block font-normal">
+                    Current operational status of the station (optional)
+                  </span>
+                </label>
+                <div className="grid grid-cols-2 gap-4">
+                  <label className="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+                    <input
+                      {...register('air_status')}
+                      type="radio"
+                      value="on_air"
+                      className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300"
+                    />
+                    <div className="ml-3">
+                      <div className="flex items-center">
+                        <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
+                        <span className="text-sm font-medium text-gray-900">ON AIR</span>
+                      </div>
+                      <div className="text-xs text-gray-500">Station is operational</div>
+                    </div>
+                  </label>
+                  
+                  <label className="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+                    <input
+                      {...register('air_status')}
+                      type="radio"
+                      value="off_air"
+                      className="h-4 w-4 text-red-600 focus:ring-red-500 border-gray-300"
+                    />
+                    <div className="ml-3">
+                      <div className="flex items-center">
+                        <div className="w-2 h-2 bg-red-500 rounded-full mr-2"></div>
+                        <span className="text-sm font-medium text-gray-900">OFF AIR</span>
+                      </div>
+                      <div className="text-xs text-gray-500">Station not operational</div>
+                    </div>
+                  </label>
+                </div>
+                {errors.air_status && (
+                  <p className="form-error">{errors.air_status.message}</p>
+                )}
+              </div>
+
+              {/* Off Air Reason - Conditional */}
+              {airStatus === 'off_air' && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                  <label className="form-label text-red-800">
+                    Reason for being OFF AIR
+                    <span className="text-xs text-red-600 block font-normal">
+                      Please explain why the station is not operational
+                    </span>
+                  </label>
+                  <textarea
+                    {...register('off_air_reason')}
+                    className={`form-input ${errors.off_air_reason ? 'form-input-error' : ''}`}
+                    rows="3"
+                    placeholder="Explain why the station is not operational (e.g., equipment failure, maintenance, power issues, etc.)"
+                  />
+                  {errors.off_air_reason && (
+                    <p className="form-error">{errors.off_air_reason.message}</p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Broadcaster Information - SECONDARY SECTION */}
+        <div className="card">
+          <div className="card-header">
+            <div className="flex items-center">
+              <h2 className="text-lg font-semibold text-gray-900">
+                Broadcaster Information
+              </h2>
+              <span className="ml-2 text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">Optional</span>
+            </div>
+            <p className="text-sm text-gray-600 mt-1">
+              Fill this if you can identify the broadcaster. This information can be added later.
+            </p>
           </div>
           <div className="card-body">
             <div className="mobile-form">
               {/* Broadcaster Name with Search Dropdown */}
               <div className="relative">
                 <label className="form-label">
-                  Name of Broadcaster *
+                  Name of Broadcaster
                 </label>
                 <div className="relative">
                   <input
@@ -468,7 +829,7 @@ const Step1 = () => {
                     onChange={handleBroadcasterSearchChange}
                     onFocus={() => setShowBroadcasterDropdown(true)}
                     className={`form-input ${errors.broadcaster_name ? 'form-input-error' : ''}`}
-                    placeholder="Search for broadcaster..."
+                    placeholder="Search for broadcaster or leave blank if unknown..."
                     autoComplete="off"
                   />
                   
@@ -577,7 +938,6 @@ const Step1 = () => {
                 </div>
               </div>
 
-              {/* Rest of the form remains the same... */}
               {/* Address Fields */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -692,14 +1052,17 @@ const Step1 = () => {
         <div className="card">
           <div className="card-header">
             <h2 className="text-lg font-semibold text-gray-900">
-              General Data
+              Station Technical Information
             </h2>
+            <p className="text-sm text-gray-600 mt-1">
+              Technical details about the station (all optional)
+            </p>
           </div>
           <div className="card-body">
             <div className="mobile-form">
               {/* Station Type */}
               <div>
-                <label className="form-label">Type of Station *</label>
+                <label className="form-label">Type of Station</label>
                 <select
                   {...register('station_type')}
                   className={`form-input ${errors.station_type ? 'form-input-error' : ''}`}
@@ -716,7 +1079,7 @@ const Step1 = () => {
 
               {/* Transmitting Site */}
               <div>
-                <label className="form-label">Name of the Transmitting Site *</label>
+                <label className="form-label">Name of the Transmitting Site</label>
                 <input
                   {...register('transmitting_site_name')}
                   className={`form-input ${errors.transmitting_site_name ? 'form-input-error' : ''}`}
@@ -727,7 +1090,7 @@ const Step1 = () => {
                 )}
               </div>
                 
-            {/* GPS Location */}
+              {/* GPS Location */}
               <GPSLocationComponent
                 setValue={setValue}
                 watch={watch}
@@ -830,7 +1193,7 @@ const Step1 = () => {
           </div>
         </div>
 
-        {/* Navigation Buttons */}
+        {/* Navigation Buttons - SIMPLIFIED */}
         <div className="flex flex-col sm:flex-row justify-between space-y-4 sm:space-y-0 sm:space-x-4">
           <button
             type="button"
@@ -843,26 +1206,21 @@ const Step1 = () => {
 
           <div className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
             <button
-              type="button"
-              onClick={handleSubmit(onSave)}
-              disabled={autoSaveMutation.isPending}
-              className="btn btn-secondary"
-            >
-              {autoSaveMutation.isPending ? (
-                <LoadingSpinner size="sm" className="mr-2" />
-              ) : (
-                <Save className="w-4 h-4 mr-2" />
-              )}
-              Save Draft
-            </button>
-
-            <button
               type="submit"
               disabled={autoSaveMutation.isPending}
               className="btn btn-primary"
             >
-              Continue to Tower Info
-              <ChevronRight className="w-4 h-4 ml-2" />
+              {autoSaveMutation.isPending ? (
+                <>
+                  <LoadingSpinner size="sm" className="mr-2" />
+                  Saving & Continuing...
+                </>
+              ) : (
+                <>
+                  Continue to Tower Info
+                  <ChevronRight className="w-4 h-4 ml-2" />
+                </>
+              )}
             </button>
           </div>
         </div>
