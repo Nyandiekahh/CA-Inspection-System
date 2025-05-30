@@ -1,4 +1,4 @@
-# apps/reports/views.py - COMPLETE FIXED VERSION WITHOUT CIRCULAR IMPORTS
+# apps/reports/views.py - COMPLETE FIXED VERSION
 from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
@@ -11,6 +11,7 @@ from django.db import IntegrityError
 import json
 import mimetypes
 import os
+import re
 
 from .models import InspectionReport, ReportImage, ERPCalculation
 from .serializers import (
@@ -21,8 +22,38 @@ from .services import (
     DocumentGenerationService, ViolationDetectionService, 
     ERPCalculationService
 )
-from .renderers import PDFRenderer, DOCXRenderer  # Import from separate module
+from .renderers import PDFRenderer, DOCXRenderer
 from apps.inspections.models import Inspection
+
+def parse_numeric_value(value, default=0.0):
+    """
+    Parse numeric values that might contain units or text
+    Examples: "6.5 dBd" -> 6.5, "11.0" -> 11.0, "unknown" -> default
+    """
+    if not value:
+        return default
+    
+    if isinstance(value, (int, float)):
+        return float(value)
+    
+    if isinstance(value, str):
+        # Remove common units and text
+        cleaned = value.lower().strip()
+        
+        # Remove units like 'dbd', 'w', 'mhz', 'khz', etc.
+        units_to_remove = ['dbd', 'w', 'watts', 'mhz', 'khz', 'm', 'meters', 'db']
+        for unit in units_to_remove:
+            cleaned = cleaned.replace(unit, '').strip()
+        
+        # Try to extract first number from string
+        numbers = re.findall(r'-?\d+\.?\d*', cleaned)
+        if numbers:
+            try:
+                return float(numbers[0])
+            except ValueError:
+                pass
+    
+    return default
 
 class InspectionReportViewSet(viewsets.ModelViewSet):
     """ViewSet for managing inspection reports"""
@@ -85,12 +116,15 @@ class InspectionReportViewSet(viewsets.ModelViewSet):
         inspection = report.inspection
         
         try:
-            forward_power = float(inspection.amplifier_actual_reading or 0)
-            antenna_gain = float(inspection.antenna_gain or 11.0)
+            # Use the helper function to parse values
+            forward_power = parse_numeric_value(inspection.amplifier_actual_reading, 0)
+            antenna_gain = parse_numeric_value(inspection.antenna_gain, 11.0)
             frequency = inspection.transmit_frequency or "Unknown"
             
+            print(f"⚡ Parsed values - Power: {forward_power}W, Gain: {antenna_gain}dBd, Freq: {frequency}")
+            
             if forward_power > 0:
-                ERPCalculation.objects.create(
+                erp_calc = ERPCalculation.objects.create(
                     report=report,
                     channel_number="CH.1",
                     frequency_mhz=frequency,
@@ -98,102 +132,12 @@ class InspectionReportViewSet(viewsets.ModelViewSet):
                     antenna_gain_dbd=antenna_gain,
                     losses_db=1.5
                 )
-        except (ValueError, TypeError):
-            pass
-    
-    @action(detail=False, methods=['post'])
-    def bulk_upload(self, request):
-        """Enhanced bulk upload with category-based image handling"""
-        report_id = request.data.get('report_id')
-        if not report_id:
-            return Response({
-                'error': 'Report ID required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        report = get_object_or_404(InspectionReport, id=report_id)
-        
-        uploaded_images = []
-        errors = []
-        
-        # Process multiple files with enhanced metadata
-        for key, file in request.FILES.items():
-            try:
-                # Extract metadata from form data
-                image_type = request.data.get(f'{key}_type', 'other')
-                caption = request.data.get(f'{key}_caption', file.name.split('.')[0])
-                position = request.data.get(f'{key}_position', 'equipment_section')
+                print(f"✅ ERP calculation created: {erp_calc.id}")
+            else:
+                print("ℹ️ No forward power, skipping ERP calculation")
                 
-                # Validate image type
-                valid_types = [
-                    'site_overview', 'tower_structure', 'exciter', 'amplifier',
-                    'antenna_system', 'filter', 'studio_link', 'transmitter_room',
-                    'equipment_rack', 'other'
-                ]
-                
-                if image_type not in valid_types:
-                    errors.append({
-                        'filename': file.name,
-                        'error': f'Invalid image type: {image_type}'
-                    })
-                    continue
-                
-                # Validate file size (max 10MB)
-                max_size = 10 * 1024 * 1024  # 10MB
-                if file.size > max_size:
-                    errors.append({
-                        'filename': file.name,
-                        'error': 'File size exceeds 10MB limit'
-                    })
-                    continue
-                
-                # Validate file type
-                allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif']
-                if hasattr(file, 'content_type') and file.content_type not in allowed_types:
-                    errors.append({
-                        'filename': file.name,
-                        'error': 'Invalid file type. Only JPEG, PNG, and GIF are allowed'
-                    })
-                    continue
-                
-                # Create image record with enhanced positioning
-                image = ReportImage.objects.create(
-                    report=report,
-                    image=file,
-                    image_type=image_type,
-                    caption=caption,
-                    position_in_report=position,
-                    uploaded_by=request.user,
-                    # Set order based on image type for consistent layout
-                    order_in_section=ReportImage.objects.filter(
-                        report=report, 
-                        image_type=image_type
-                    ).count() + 1
-                )
-                
-                uploaded_images.append({
-                    'id': image.id,
-                    'filename': file.name,
-                    'type': image_type,
-                    'caption': caption,
-                    'position': position,
-                    'file_size': file.size,
-                    'url': request.build_absolute_uri(image.image.url) if image.image else None
-                })
-                
-            except Exception as e:
-                errors.append({
-                    'filename': file.name,
-                    'error': str(e)
-                })
-        
-        return Response({
-            'success': True,
-            'uploaded_images': uploaded_images,
-            'errors': errors,
-            'total_uploaded': len(uploaded_images),
-            'total_errors': len(errors),
-            'report_id': str(report.id)
-        })
+        except Exception as e:
+            print(f"⚠️ ERP calculation failed: {str(e)}")
 
     @action(detail=True, methods=['post'])
     def generate_documents(self, request, pk=None):
@@ -681,12 +625,16 @@ class ERPCalculationViewSet(viewsets.ModelViewSet):
         
         for channel_data in channels:
             try:
-                # Extract channel data
+                # Extract channel data with improved parsing
                 channel_number = channel_data.get('channel_number', 'CH.1')
                 frequency_mhz = channel_data.get('frequency_mhz', 'Unknown')
-                forward_power = float(channel_data.get('forward_power_w', 0))
-                antenna_gain = float(channel_data.get('antenna_gain_dbd', 11.0))
-                losses = float(channel_data.get('losses_db', 1.5))
+                
+                # Use helper function to parse numeric values
+                forward_power = parse_numeric_value(channel_data.get('forward_power_w'), 0)
+                antenna_gain = parse_numeric_value(channel_data.get('antenna_gain_dbd'), 11.0)
+                losses = parse_numeric_value(channel_data.get('losses_db'), 1.5)
+                
+                print(f"📊 Channel {channel_number}: Power={forward_power}, Gain={antenna_gain}, Losses={losses}")
                 
                 if forward_power <= 0:
                     errors.append({
@@ -717,7 +665,8 @@ class ERPCalculationViewSet(viewsets.ModelViewSet):
                     'created': created
                 })
                 
-            except (ValueError, TypeError) as e:
+            except Exception as e:
+                print(f"❌ Error calculating ERP for channel {channel_data.get('channel_number', 'Unknown')}: {str(e)}")
                 errors.append({
                     'channel': channel_data.get('channel_number', 'Unknown'),
                     'error': str(e)
@@ -752,6 +701,128 @@ class ReportImageViewSet(viewsets.ModelViewSet):
         """Upload image with metadata"""
         serializer.save(uploaded_by=self.request.user)
     
+    @action(detail=False, methods=['post'])
+    def bulk_upload(self, request):
+        """Enhanced bulk upload with category-based image handling"""
+        print(f"📸 BULK UPLOAD called with {len(request.FILES)} files")
+        
+        report_id = request.data.get('report_id')
+        if not report_id:
+            print("❌ No report_id provided")
+            return Response({
+                'error': 'Report ID required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        print(f"📋 Report ID: {report_id}")
+        
+        try:
+            report = get_object_or_404(InspectionReport, id=report_id)
+            print(f"✅ Found report: {report.reference_number}")
+        except Exception as e:
+            print(f"❌ Report not found: {str(e)}")
+            return Response({
+                'error': f'Report not found: {str(e)}'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        uploaded_images = []
+        errors = []
+        
+        # Process multiple files with enhanced metadata
+        for key, file in request.FILES.items():
+            print(f"📷 Processing file: {key} - {file.name}")
+            
+            try:
+                # Extract metadata from form data
+                image_type = request.data.get(f'{key}_type', 'other')
+                caption = request.data.get(f'{key}_caption', file.name.split('.')[0])
+                position = request.data.get(f'{key}_position', 'equipment_section')
+                
+                print(f"   Type: {image_type}, Caption: {caption}, Position: {position}")
+                
+                # Validate image type
+                valid_types = [
+                    'site_overview', 'tower_structure', 'exciter', 'amplifier',
+                    'antenna_system', 'filter', 'studio_link', 'transmitter_room',
+                    'equipment_rack', 'other'
+                ]
+                
+                if image_type not in valid_types:
+                    error_msg = f'Invalid image type: {image_type}'
+                    print(f"   ❌ {error_msg}")
+                    errors.append({
+                        'filename': file.name,
+                        'error': error_msg
+                    })
+                    continue
+                
+                # Validate file size (max 10MB)
+                max_size = 10 * 1024 * 1024  # 10MB
+                if file.size > max_size:
+                    error_msg = 'File size exceeds 10MB limit'
+                    print(f"   ❌ {error_msg}")
+                    errors.append({
+                        'filename': file.name,
+                        'error': error_msg
+                    })
+                    continue
+                
+                # Validate file type
+                allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif']
+                if hasattr(file, 'content_type') and file.content_type not in allowed_types:
+                    error_msg = 'Invalid file type. Only JPEG, PNG, and GIF are allowed'
+                    print(f"   ❌ {error_msg}")
+                    errors.append({
+                        'filename': file.name,
+                        'error': error_msg
+                    })
+                    continue
+                
+                # Create image record with enhanced positioning
+                image = ReportImage.objects.create(
+                    report=report,
+                    image=file,
+                    image_type=image_type,
+                    caption=caption,
+                    position_in_report=position,
+                    uploaded_by=request.user,
+                    # Set order based on image type for consistent layout
+                    order_in_section=ReportImage.objects.filter(
+                        report=report, 
+                        image_type=image_type
+                    ).count() + 1
+                )
+                
+                print(f"   ✅ Image created with ID: {image.id}")
+                
+                uploaded_images.append({
+                    'id': image.id,
+                    'filename': file.name,
+                    'type': image_type,
+                    'caption': caption,
+                    'position': position,
+                    'file_size': file.size,
+                    'url': request.build_absolute_uri(image.image.url) if image.image else None
+                })
+                
+            except Exception as e:
+                error_msg = str(e)
+                print(f"   ❌ Error processing {file.name}: {error_msg}")
+                errors.append({
+                    'filename': file.name,
+                    'error': error_msg
+                })
+        
+        print(f"📊 Upload complete: {len(uploaded_images)} uploaded, {len(errors)} errors")
+        
+        return Response({
+            'success': True,
+            'uploaded_images': uploaded_images,
+            'errors': errors,
+            'total_uploaded': len(uploaded_images),
+            'total_errors': len(errors),
+            'report_id': str(report.id)
+        })
+    
     @action(detail=True, methods=['post'])
     def update_position(self, request, pk=None):
         """Update image position in report"""
@@ -775,9 +846,6 @@ class ReportImageViewSet(viewsets.ModelViewSet):
         }, status=status.HTTP_400_BAD_REQUEST)
 
 # Additional utility views
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_report_from_inspection(request, inspection_id):
@@ -882,11 +950,12 @@ def create_report_from_inspection(request, inspection_id):
         # Create ERP calculation if possible
         print("⚡ Creating ERP calculation...")
         try:
-            forward_power = float(inspection.amplifier_actual_reading or 0)
-            antenna_gain = float(inspection.antenna_gain or 11.0)
+            # Use the helper function to parse values
+            forward_power = parse_numeric_value(inspection.amplifier_actual_reading, 0)
+            antenna_gain = parse_numeric_value(inspection.antenna_gain, 11.0)
             frequency = inspection.transmit_frequency or "Unknown"
             
-            print(f"⚡ Power: {forward_power}W, Gain: {antenna_gain}dBd, Freq: {frequency}")
+            print(f"⚡ Parsed values - Power: {forward_power}W, Gain: {antenna_gain}dBd, Freq: {frequency}")
             
             if forward_power > 0:
                 erp_calc = ERPCalculation.objects.create(
@@ -901,7 +970,7 @@ def create_report_from_inspection(request, inspection_id):
             else:
                 print("ℹ️ No forward power, skipping ERP calculation")
                 
-        except (ValueError, TypeError) as erp_error:
+        except Exception as erp_error:
             print(f"⚠️ ERP calculation failed: {str(erp_error)}")
         
         print("🎉 SUCCESS: Report creation completed")
@@ -1039,7 +1108,7 @@ def validate_report_data(request):
     erp_data = request.data.get('erp_calculations', [])
     for i, calc in enumerate(erp_data):
         try:
-            power = float(calc.get('forward_power_w', 0))
+            power = parse_numeric_value(calc.get('forward_power_w'), 0)
             if power <= 0:
                 errors.append(f"ERP calculation {i+1}: Forward power must be greater than 0")
         except (ValueError, TypeError):

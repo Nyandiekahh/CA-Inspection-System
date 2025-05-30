@@ -1,4 +1,4 @@
-# apps/inspections/views.py - FIXED VERSION
+# apps/inspections/views.py - COMPLETE FIXED VERSION
 from rest_framework import viewsets, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -8,6 +8,7 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from .models import Inspection
 from .serializers import InspectionSerializer, SimpleInspectionSerializer
+from apps.broadcasters.models import Broadcaster
 from django.contrib.auth import get_user_model
 import json
 
@@ -50,6 +51,13 @@ class InspectionViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         print(f"🔍 CREATE request data: {request.data}")
         
+        # Prepare data for creation
+        data = request.data.copy()
+        
+        # FIXED: Handle optional broadcaster - let serializer handle defaults
+        if not data.get('broadcaster') and not data.get('broadcaster_name'):
+            print("📝 No broadcaster provided, serializer will create default")
+        
         # Get or create a default inspector for development
         inspector = None
         if request.user.is_authenticated:
@@ -66,7 +74,6 @@ class InspectionViewSet(viewsets.ModelViewSet):
                 )
         
         # Ensure we have required data
-        data = request.data.copy()
         if not data.get('inspection_date'):
             from datetime import date
             data['inspection_date'] = date.today().isoformat()
@@ -77,6 +84,12 @@ class InspectionViewSet(viewsets.ModelViewSet):
         # Set inspector
         data['inspector'] = inspector.id
         
+        # FIXED: Ensure air_status has a default
+        if not data.get('air_status'):
+            data['air_status'] = 'on_air'
+        
+        print(f"📝 Prepared CREATE data: {data}")
+        
         serializer = self.get_serializer(data=data)
         if serializer.is_valid():
             inspection = serializer.save()
@@ -84,9 +97,16 @@ class InspectionViewSet(viewsets.ModelViewSet):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         else:
             print(f"❌ CREATE Validation errors: {serializer.errors}")
+            
+            # FIXED: Better error handling - show specific field errors
+            error_details = {}
+            for field, errors in serializer.errors.items():
+                error_details[field] = errors if isinstance(errors, list) else [str(errors)]
+            
             return Response({
-                'errors': serializer.errors,
-                'message': 'Validation failed on CREATE'
+                'errors': error_details,
+                'message': 'Validation failed on CREATE',
+                'received_data': {k: v for k, v in data.items() if k != 'inspector'}  # Don't expose inspector in error
             }, status=status.HTTP_400_BAD_REQUEST)
     
     def retrieve(self, request, *args, **kwargs):
@@ -125,9 +145,12 @@ class InspectionViewSet(viewsets.ModelViewSet):
         # Prepare data for update
         data = request.data.copy()
         
-        # Don't update these fields if they're not provided
+        # FIXED: Preserve existing values if not provided in update
         if 'inspector' not in data and instance.inspector:
             data['inspector'] = instance.inspector.id
+        
+        if 'broadcaster' not in data and instance.broadcaster:
+            data['broadcaster'] = instance.broadcaster.id
         
         # Make sure we have basic required fields
         if not data.get('inspection_date'):
@@ -135,6 +158,19 @@ class InspectionViewSet(viewsets.ModelViewSet):
         
         if not data.get('status'):
             data['status'] = instance.status or 'draft'
+        
+        # FIXED: Preserve air_status and off_air_reason if not provided
+        if not data.get('air_status'):
+            data['air_status'] = instance.air_status or 'on_air'
+        
+        # FIXED: If air_status is off_air but no off_air_reason provided, preserve existing one
+        if data.get('air_status') == 'off_air' and not data.get('off_air_reason'):
+            if instance.off_air_reason:
+                data['off_air_reason'] = instance.off_air_reason
+                print(f"📝 [Views] Preserving existing off_air_reason: {instance.off_air_reason}")
+            else:
+                data['off_air_reason'] = 'Pending completion'
+                print(f"📝 [Views] Setting placeholder off_air_reason")
         
         print(f"📝 Prepared update data: {data}")
         
@@ -146,12 +182,16 @@ class InspectionViewSet(viewsets.ModelViewSet):
             return Response(serializer.data)
         else:
             print(f"❌ UPDATE Validation errors: {serializer.errors}")
-            print(f"❌ UPDATE Non-field errors: {serializer.non_field_errors()}")
+            
+            # FIXED: Better error handling for updates - removed non_field_errors() call
+            error_details = {}
+            for field, errors in serializer.errors.items():
+                error_details[field] = errors if isinstance(errors, list) else [str(errors)]
+            
             return Response({
-                'errors': serializer.errors,
-                'non_field_errors': serializer.non_field_errors(),
+                'errors': error_details,
                 'message': 'Validation failed on UPDATE',
-                'received_data': data
+                'received_data': {k: v for k, v in data.items() if k not in ['inspector', 'broadcaster']}
             }, status=status.HTTP_400_BAD_REQUEST)
     
     def partial_update(self, request, *args, **kwargs):

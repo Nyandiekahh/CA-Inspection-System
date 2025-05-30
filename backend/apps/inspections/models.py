@@ -14,7 +14,15 @@ class Inspection(models.Model):
     
     # Form identification
     form_number = models.CharField(max_length=20, unique=True, verbose_name="Form Number (CA/F/PSM/17)")
-    broadcaster = models.ForeignKey(Broadcaster, on_delete=models.CASCADE, related_name='inspections')
+    
+    # FIXED: Make broadcaster optional
+    broadcaster = models.ForeignKey(
+        Broadcaster, 
+        on_delete=models.CASCADE, 
+        related_name='inspections',
+        null=True,  # Allow NULL in database
+        blank=True  # Allow empty in forms/serializers
+    )
     
     # Inspection details
     inspection_date = models.DateField()
@@ -22,6 +30,32 @@ class Inspection(models.Model):
     
     # Inspector information
     inspector = models.ForeignKey(User, on_delete=models.CASCADE, related_name='inspections')
+    
+    # ============= MISSING FIELDS - ADDED =============
+    # Program and air status fields (from frontend Step1)
+    program_name = models.CharField(max_length=255, blank=True, null=True, verbose_name="Program Name")
+    air_status = models.CharField(
+        max_length=10, 
+        choices=[('on_air', 'ON AIR'), ('off_air', 'OFF AIR')], 
+        default='on_air',
+        verbose_name="Air Status"
+    )
+    off_air_reason = models.TextField(
+        blank=True, 
+        null=True,
+        verbose_name="Reason for being OFF AIR (if applicable)"
+    )
+    
+    # Optional: Program foreign key for better data modeling
+    program = models.ForeignKey(
+        'broadcasters.ProgramName', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='inspections',
+        verbose_name="Program Reference"
+    )
+    # ====================================================
     
     # ============= STEP 1: ADMINISTRATIVE & GENERAL DATA =============
     # Broadcaster details (duplicated for form filling convenience)
@@ -150,7 +184,10 @@ class Inspection(models.Model):
     estimated_antenna_losses = models.CharField(max_length=50, blank=True, null=True)
     estimated_feeder_losses = models.CharField(max_length=50, blank=True, null=True)
     estimated_multiplexer_losses = models.CharField(max_length=50, blank=True, null=True)
+    estimated_system_losses = models.CharField(max_length=50, blank=True, null=True)  # NEW FIELD
     effective_radiated_power = models.CharField(max_length=50, blank=True, null=True)
+    effective_radiated_power_dbw = models.CharField(max_length=50, blank=True, null=True, verbose_name="Effective Radiated Power (dBW)")
+
     antenna_catalog_attached = models.BooleanField(default=False)
     
     # Studio Link
@@ -159,6 +196,12 @@ class Inspection(models.Model):
     studio_serial_number = models.CharField(max_length=255, blank=True, null=True)
     studio_frequency = models.CharField(max_length=50, blank=True, null=True)
     studio_polarization = models.CharField(max_length=255, blank=True, null=True)
+    stl_type = models.CharField(max_length=50, choices=[  # NEW FIELD
+        ('ip_based', 'IP-Based STL (Internet Protocol)'),
+        ('satellite', 'Satellite STL'),
+        ('vhf', 'VHF STL'),
+        ('studio_on_site', 'Studio On Site (SOS)')
+    ], blank=True, null=True)
     signal_description = models.TextField(blank=True, null=True)
     
     # ============= FINAL INFORMATION =============
@@ -198,7 +241,8 @@ class Inspection(models.Model):
         super().save(*args, **kwargs)
     
     def __str__(self):
-        return f"{self.form_number} - {self.broadcaster.name}"
+        broadcaster_name = self.broadcaster.name if self.broadcaster else 'Unknown Broadcaster'
+        return f"{self.form_number} - {broadcaster_name}"
     
     class Meta:
         db_table = 'inspections'

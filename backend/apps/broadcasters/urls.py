@@ -4,9 +4,10 @@ from . import views
 
 router = DefaultRouter()
 router.register(r'broadcasters', views.BroadcasterViewSet)
+router.register(r'programs', views.ProgramNameViewSet)
 router.register(r'general-data', views.GeneralDataViewSet)
 
 urlpatterns = [
     path('', include(router.urls)),
-    path('test/', views.test_broadcasters, name='test-broadcasters'),  # TEST ENDPOINT
+    path('test/', views.test_broadcasters, name='test-broadcasters'),
 ]

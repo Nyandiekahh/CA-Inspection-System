@@ -1,4 +1,4 @@
-# apps/reports/urls.py - FIXED VERSION
+# apps/reports/urls.py - COMPLETE FILE
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from . import views
@@ -18,7 +18,7 @@ urlpatterns = [
     
     # Enhanced image management
     path('images/bulk_upload/', 
-         views.InspectionReportViewSet.as_view({'post': 'bulk_upload'}), 
+         views.ReportImageViewSet.as_view({'post': 'bulk_upload'}), 
          name='bulk-upload-images'),
     
     # Professional document generation
@@ -26,18 +26,13 @@ urlpatterns = [
          views.InspectionReportViewSet.as_view({'post': 'generate_documents'}),
          name='generate-documents'),
     
-    # FIXED: PDF download with proper renderer
+    # Document downloads
     path('reports/<uuid:pk>/download_pdf/',
-         views.InspectionReportViewSet.as_view({
-             'get': 'download_pdf'
-         }, renderer_classes=[views.PDFRenderer]),
+         views.InspectionReportViewSet.as_view({'get': 'download_pdf'}),
          name='download-pdf'),
     
-    # FIXED: DOCX download with proper renderer  
     path('reports/<uuid:pk>/download_docx/',
-         views.InspectionReportViewSet.as_view({
-             'get': 'download_docx'
-         }, renderer_classes=[views.DOCXRenderer]),
+         views.InspectionReportViewSet.as_view({'get': 'download_docx'}),
          name='download-docx'),
     
     # Enhanced preview and analysis
