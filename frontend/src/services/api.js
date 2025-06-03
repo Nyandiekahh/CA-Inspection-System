@@ -185,7 +185,7 @@ export const inspectionsAPI = {
   autoSave: (id, data) => api.post(`/inspections/inspections/${id}/auto-save/`, data),
 };
 
-// Enhanced Reports API with Professional Document Generation
+// Updated reportsAPI section - DOCX Only & No ERP Calculation
 export const reportsAPI = {
   // Main reports management
   getAll: (params = {}) => api.get('/reports/reports/', { params }),
@@ -198,34 +198,18 @@ export const reportsAPI = {
   createFromInspection: (inspectionId) => 
     api.post(`/reports/create-from-inspection/${inspectionId}/`),
   
-  // Professional document generation
+  // Professional document generation - DOCX ONLY
   generateDocuments: (reportId, data) => 
     api.post(`/reports/reports/${reportId}/generate_documents/`, {
       ...data,
+      formats: ['docx'], // FORCE DOCX ONLY
       professional_formatting: true,
       ca_template: true
     }),
   
-  // Enhanced document downloads with proper file naming
-  downloadPDF: (reportId, referenceNumber) => 
-    api.get(`/reports/reports/${reportId}/download_pdf/`, { 
-      responseType: 'blob',
-      headers: {
-        'Accept': 'application/pdf'
-      }
-    }).then(response => {
-      // Create download link with proper filename
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `${referenceNumber?.replace(/\//g, '_') || 'report'}.pdf`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-      return response;
-    }),
+  // REMOVED: downloadPDF function
   
+  // Enhanced DOCX download with proper file naming
   downloadDOCX: (reportId, referenceNumber) => 
     api.get(`/reports/reports/${reportId}/download_docx/`, { 
       responseType: 'blob',
@@ -296,21 +280,12 @@ export const reportsAPI = {
   deleteImage: (imageId) => 
     api.delete(`/reports/images/${imageId}/`),
   
-  // ERP Calculations with enhanced functionality
-  calculateERP: (data) => 
-    api.post('/reports/erp-calculations/calculate_erp/', data),
-  
-  bulkCalculateERP: (data) => 
-    api.post('/reports/erp-calculations/bulk_calculate/', data),
-  
-  getERPCalculations: (reportId) => 
-    api.get('/reports/erp-calculations/', { params: { report: reportId } }),
-  
-  updateERPCalculation: (calcId, data) => 
-    api.put(`/reports/erp-calculations/${calcId}/`, data),
-  
-  deleteERPCalculation: (calcId) => 
-    api.delete(`/reports/erp-calculations/${calcId}/`),
+  // REMOVED: All ERP calculation endpoints
+  // - calculateERP
+  // - bulkCalculateERP
+  // - getERPCalculations
+  // - updateERPCalculation
+  // - deleteERPCalculation
   
   // Templates and validation
   getTemplates: () => 
@@ -319,10 +294,10 @@ export const reportsAPI = {
   validateReportData: (data) => 
     api.post('/reports/validate/', data),
   
-  // Advanced report features
+  // Advanced report features - UPDATED FOR DOCX ONLY
   generateProfessionalReport: (reportId, options = {}) => 
     api.post(`/reports/reports/${reportId}/generate_documents/`, {
-      formats: options.formats || ['pdf'],
+      formats: ['docx'], // FORCE DOCX ONLY
       include_images: options.include_images !== false,
       professional_formatting: true,
       ca_template: true,
@@ -336,7 +311,7 @@ export const reportsAPI = {
   bulkDelete: (reportIds) => 
     api.post('/reports/reports/bulk_delete/', { report_ids: reportIds }),
   
-  bulkExport: (reportIds, format = 'pdf') => 
+  bulkExport: (reportIds, format = 'docx') => // CHANGED: default to docx
     api.post('/reports/reports/bulk_export/', { 
       report_ids: reportIds, 
       format: format 

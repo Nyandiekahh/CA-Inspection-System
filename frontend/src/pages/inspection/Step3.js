@@ -571,16 +571,18 @@ const Step3 = () => {
           <div className="card-body">
             <div className="mobile-form">
               <div>
-                <label className="form-label">Type (Band Pass Filter or Notch Filter)</label>
-                <select
-                  {...register('filter_type')}
-                  className="form-input"
-                >
-                  <option value="">Select filter type</option>
-                  <option value="band_pass">Band Pass Filter</option>
-                  <option value="notch">Notch Filter</option>
-                </select>
-              </div>
+  <label className="form-label">Type (Select Filter Type)</label>
+  <select
+    {...register('filter_type')}
+    className="form-input"
+  >
+    <option value="">Select filter type</option>
+    <option value="standard_band_pass">Standard Band Pass Filter</option>
+    <option value="notch">Notch Filter</option>
+    <option value="high_q_triple_cavity">High-Q Triple Cavity Filter</option>
+  </select>
+</div>
+
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>

@@ -1,4 +1,4 @@
-// Enhanced Report Generation Component - COMPLETE REPLACEMENT
+// Enhanced Report Generation Component - UPDATED VERSION (ERP Fetching & DOCX Only)
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -11,13 +11,14 @@ import {
   AlertCircle, 
   CheckCircle, 
   Clock,
-  Calculator,
   Image as ImageIcon,
   ArrowLeft,
   Camera,
   X,
   Plus,
-  Check
+  Check,
+  Edit3,
+  Trash2
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 
@@ -37,76 +38,81 @@ const EnhancedReportGeneration = () => {
     conclusions: '',
     recommendations: '',
     include_images: true,
-    formats: ['pdf']
+    formats: ['docx'] // CHANGED: Only DOCX format
   });
   
-  // Enhanced image management with categories
+  // Updated image management - simplified to required categories only
   const [imageCategories, setImageCategories] = useState({
-    site_overview: { files: [], hasImage: false, optional: true },
-    tower_structure: { files: [], hasImage: false, optional: false },
-    exciter: { files: [], hasImage: false, optional: false },
-    amplifier: { files: [], hasImage: false, optional: false },
-    antenna_system: { files: [], hasImage: false, optional: false },
-    filter: { files: [], hasImage: false, optional: true },
-    studio_link: { files: [], hasImage: false, optional: true },
-    transmitter_room: { files: [], hasImage: false, optional: true },
-    equipment_rack: { files: [], hasImage: false, optional: true },
-    other: { files: [], hasImage: false, optional: true }
+    site_overview: { 
+      photos: [], // Array of {file, description, id}
+      hasPhotos: false
+    },
+    tower_mast: { 
+      photos: [], 
+      hasPhotos: false
+    },
+    transmitter_equipment: { 
+      photos: [], 
+      hasPhotos: false
+    },
+    antenna: { 
+      photos: [], 
+      hasPhotos: false
+    },
+    studio_transmitter_link: { 
+      photos: [], 
+      hasPhotos: false
+    },
+    filter_equipment: { 
+      photos: [], 
+      hasPhotos: false
+    },
+    other_equipment: { 
+      photos: [], 
+      hasPhotos: false
+    }
   });
   
-  const [erpCalculations, setErpCalculations] = useState([]);
+  // REMOVED: erpCalculations state - will fetch from inspection data
   const [reportId, setReportId] = useState(null);
+  const [photoDescriptionModal, setPhotoDescriptionModal] = useState(null);
+  const [editingPhoto, setEditingPhoto] = useState(null);
 
-  // Image category labels and descriptions
+  // Image category labels and descriptions - Updated to match backend
   const imageCategoryInfo = {
     site_overview: {
       label: 'Site Overview',
-      description: 'Overall view of the transmitter site',
+      description: 'Overall view of the transmitter site and surroundings',
       icon: '🏢'
     },
-    tower_structure: {
+    tower_mast: {
       label: 'Tower/Mast Structure',
-      description: 'Tower or mast supporting the antenna',
+      description: 'Tower or mast supporting the antenna system',
       icon: '🗼'
     },
-    exciter: {
-      label: 'Exciter Equipment',
-      description: 'Exciter unit and related equipment',
+    transmitter_equipment: {
+      label: 'Transmitter Equipment',
+      description: 'Exciter, amplifier, and related transmitter equipment',
       icon: '📻'
     },
-    amplifier: {
-      label: 'Amplifier Equipment',
-      description: 'Power amplifier and associated equipment',
-      icon: '🔊'
-    },
-    antenna_system: {
+    antenna: {
       label: 'Antenna System',
-      description: 'Antenna and mounting hardware',
+      description: 'Antenna and mounting hardware on the tower',
       icon: '📡'
     },
-    filter: {
-      label: 'Filter Equipment',
-      description: 'Band pass filters and combiners',
-      icon: '🔧'
-    },
-    studio_link: {
+    studio_transmitter_link: {
       label: 'Studio to Transmitter Link',
-      description: 'STL equipment and connections',
+      description: 'STL equipment and connections between studio and transmitter',
       icon: '📶'
     },
-    transmitter_room: {
-      label: 'Transmitter Room',
-      description: 'Interior view of transmitter facility',
-      icon: '🏠'
+    filter_equipment: {
+      label: 'Filter Equipment',
+      description: 'Band pass filters, combiners, and related filtering equipment',
+      icon: '🔧'
     },
-    equipment_rack: {
-      label: 'Equipment Rack',
-      description: 'Equipment racks and installations',
-      icon: '⚡'
-    },
-    other: {
+    other_equipment: {
       label: 'Other Equipment',
-      description: 'Any other relevant equipment',
+      description: 'Any other relevant equipment not covered in specific categories',
       icon: '📷'
     }
   };
@@ -142,28 +148,18 @@ const EnhancedReportGeneration = () => {
     }
   });
 
-  // ERP calculation mutation
-  const erpCalculationMutation = useMutation({
-    mutationFn: (data) => reportsAPI.bulkCalculateERP(data),
-    onSuccess: (response) => {
-      toast.success(`ERP calculations completed!`);
-      setErpCalculations(response.data.calculations);
-    },
-    onError: (error) => {
-      toast.error(error.response?.data?.error || 'Failed to calculate ERP');
-    }
-  });
+  // REMOVED: ERP calculation mutation - no longer needed
 
   // Generate documents mutation
   const generateDocumentsMutation = useMutation({
     mutationFn: (data) => reportsAPI.generateDocuments(reportId, data),
     onSuccess: () => {
-      toast.success('Professional documents generated successfully!');
+      toast.success('Professional document generated successfully!');
       queryClient.invalidateQueries(['reports']);
       navigate(`/reports/view/${reportId}`);
     },
     onError: (error) => {
-      toast.error(error.response?.data?.error || 'Failed to generate documents');
+      toast.error(error.response?.data?.error || 'Failed to generate document');
     }
   });
 
@@ -174,42 +170,106 @@ const EnhancedReportGeneration = () => {
     }
   }, [inspection]);
 
-  const handleCategoryImageUpload = (category, event) => {
+  // Handle file selection for a category
+  const handleCategoryFileSelection = (category, event) => {
     const files = Array.from(event.target.files);
     if (files.length > 0) {
+      // For each file, we'll prompt for description
+      const newPhotos = files.map(file => ({
+        id: Date.now() + Math.random(), // Unique ID
+        file: file,
+        description: '', // Will be filled by user
+        name: file.name
+      }));
+      
+      // Open description modal for the first photo
+      if (newPhotos.length > 0) {
+        setPhotoDescriptionModal({
+          category,
+          photos: newPhotos,
+          currentIndex: 0
+        });
+      }
+    }
+    // Reset file input
+    event.target.value = '';
+  };
+
+  // Handle photo description submission
+  const handlePhotoDescriptionSubmit = (description) => {
+    if (!photoDescriptionModal) return;
+    
+    const { category, photos, currentIndex } = photoDescriptionModal;
+    const updatedPhotos = [...photos];
+    updatedPhotos[currentIndex].description = description;
+    
+    if (currentIndex < photos.length - 1) {
+      // Move to next photo
+      setPhotoDescriptionModal({
+        ...photoDescriptionModal,
+        photos: updatedPhotos,
+        currentIndex: currentIndex + 1
+      });
+    } else {
+      // All photos have descriptions, add to category
       setImageCategories(prev => ({
         ...prev,
         [category]: {
-          ...prev[category],
-          files: files,
-          hasImage: true
+          photos: [...prev[category].photos, ...updatedPhotos],
+          hasPhotos: true
         }
       }));
+      setPhotoDescriptionModal(null);
     }
   };
 
-  const handleNoImageAvailable = (category) => {
+  // Handle photo description edit
+  const handleEditPhotoDescription = (category, photoId) => {
+    const categoryData = imageCategories[category];
+    const photo = categoryData.photos.find(p => p.id === photoId);
+    if (photo) {
+      setEditingPhoto({
+        category,
+        photoId,
+        description: photo.description
+      });
+    }
+  };
+
+  // Save edited photo description
+  const handleSaveEditedDescription = (newDescription) => {
+    if (!editingPhoto) return;
+    
+    const { category, photoId } = editingPhoto;
     setImageCategories(prev => ({
       ...prev,
       [category]: {
         ...prev[category],
-        files: [],
-        hasImage: false
+        photos: prev[category].photos.map(photo =>
+          photo.id === photoId 
+            ? { ...photo, description: newDescription }
+            : photo
+        )
       }
     }));
+    setEditingPhoto(null);
   };
 
-  const removeCategoryImage = (category) => {
-    setImageCategories(prev => ({
-      ...prev,
-      [category]: {
-        ...prev[category],
-        files: [],
-        hasImage: false
-      }
-    }));
+  // Remove a specific photo
+  const removePhoto = (category, photoId) => {
+    setImageCategories(prev => {
+      const updatedPhotos = prev[category].photos.filter(photo => photo.id !== photoId);
+      return {
+        ...prev,
+        [category]: {
+          photos: updatedPhotos,
+          hasPhotos: updatedPhotos.length > 0
+        }
+      };
+    });
   };
 
+  // Upload all photos
   const uploadAllImages = async () => {
     if (!reportId) return;
 
@@ -218,12 +278,11 @@ const EnhancedReportGeneration = () => {
 
     let imageIndex = 0;
     Object.entries(imageCategories).forEach(([category, data]) => {
-      if (data.files.length > 0) {
-        data.files.forEach((file) => {
-          formData.append(`image_${imageIndex}`, file);
+      if (data.photos.length > 0) {
+        data.photos.forEach((photo) => {
+          formData.append(`image_${imageIndex}`, photo.file);
           formData.append(`image_${imageIndex}_type`, category);
-          formData.append(`image_${imageIndex}_caption`, 
-            `${imageCategoryInfo[category].label} - ${file.name.split('.')[0]}`);
+          formData.append(`image_${imageIndex}_caption`, photo.description || `${imageCategoryInfo[category].label}`);
           formData.append(`image_${imageIndex}_position`, 'equipment_section');
           imageIndex++;
         });
@@ -232,31 +291,18 @@ const EnhancedReportGeneration = () => {
 
     if (imageIndex > 0) {
       imageUploadMutation.mutate(formData);
+    } else {
+      toast.error('No images to upload');
     }
   };
 
-  const calculateERP = () => {
-    if (!reportId || !inspection) return;
-
-    const channelData = {
-      report_id: reportId,
-      channels: [{
-        channel_number: 'CH.1',
-        frequency_mhz: inspection.transmit_frequency || 'Unknown',
-        forward_power_w: parseFloat(inspection.amplifier_actual_reading || 0),
-        antenna_gain_dbd: parseFloat(inspection.antenna_gain || 11.0),
-        losses_db: 1.5
-      }]
-    };
-
-    erpCalculationMutation.mutate(channelData);
-  };
+  // REMOVED: calculateERP function - no longer needed
 
   const generateDocuments = () => {
     if (!reportId) return;
 
     const generationData = {
-      formats: reportData.formats,
+      formats: reportData.formats, // Only DOCX
       include_images: reportData.include_images,
       custom_observations: reportData.observations,
       custom_conclusions: reportData.conclusions,
@@ -276,25 +322,125 @@ const EnhancedReportGeneration = () => {
     { number: 1, name: 'Setup', description: 'Initialize report structure' },
     { number: 2, name: 'Images', description: 'Upload equipment photos' },
     { number: 3, name: 'Content', description: 'Review and customize' },
-    { number: 4, name: 'Generate', description: 'Create final documents' }
+    { number: 4, name: 'Generate', description: 'Create final document' } // CHANGED: singular
   ];
 
-  const getTotalImagesSelected = () => {
-    return Object.values(imageCategories).reduce((total, cat) => total + cat.files.length, 0);
+  const getTotalPhotosSelected = () => {
+    return Object.values(imageCategories).reduce((total, cat) => total + cat.photos.length, 0);
   };
 
-  const getRequiredImagesStatus = () => {
-    const requiredCategories = Object.entries(imageCategories)
-      .filter(([_, data]) => !data.optional);
+  // Photo Description Modal Component
+  const PhotoDescriptionModal = () => {
+    const [description, setDescription] = useState('');
     
-    const completedRequired = requiredCategories
-      .filter(([_, data]) => data.files.length > 0).length;
+    if (!photoDescriptionModal) return null;
     
-    return {
-      completed: completedRequired,
-      total: requiredCategories.length,
-      allComplete: completedRequired === requiredCategories.length
-    };
+    const { category, photos, currentIndex } = photoDescriptionModal;
+    const currentPhoto = photos[currentIndex];
+    const categoryInfo = imageCategoryInfo[category];
+    
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">
+              Add Description - {categoryInfo.label}
+            </h3>
+            <div className="text-sm text-gray-500">
+              Photo {currentIndex + 1} of {photos.length}
+            </div>
+          </div>
+          
+          {/* Photo Preview */}
+          <div className="mb-4">
+            <img
+              src={URL.createObjectURL(currentPhoto.file)}
+              alt={currentPhoto.name}
+              className="w-full h-48 object-cover rounded border"
+            />
+            <p className="text-sm text-gray-600 mt-2">File: {currentPhoto.name}</p>
+          </div>
+          
+          {/* Description Input */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Photo Description *
+            </label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder={`Describe this ${categoryInfo.label.toLowerCase()} photo for the report...`}
+              required
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              This description will appear as a caption in the report
+            </p>
+          </div>
+          
+          {/* Action Buttons */}
+          <div className="flex justify-between">
+            <button
+              onClick={() => setPhotoDescriptionModal(null)}
+              className="px-4 py-2 text-gray-600 border border-gray-300 rounded hover:bg-gray-50"
+            >
+              Cancel All
+            </button>
+            
+            <button
+              onClick={() => handlePhotoDescriptionSubmit(description)}
+              disabled={!description.trim()}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-300"
+            >
+              {currentIndex < photos.length - 1 ? 'Next Photo' : 'Add All Photos'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Edit Description Modal Component
+  const EditDescriptionModal = () => {
+    const [description, setDescription] = useState(editingPhoto?.description || '');
+    
+    if (!editingPhoto) return null;
+    
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+          <h3 className="text-lg font-semibold mb-4">Edit Photo Description</h3>
+          
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Description
+            </label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          
+          <div className="flex justify-end space-x-3">
+            <button
+              onClick={() => setEditingPhoto(null)}
+              className="px-4 py-2 text-gray-600 border border-gray-300 rounded hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => handleSaveEditedDescription(description)}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   if (inspectionLoading) {
@@ -307,6 +453,12 @@ const EnhancedReportGeneration = () => {
 
   return (
     <div className="space-y-6">
+      {/* Photo Description Modal */}
+      <PhotoDescriptionModal />
+      
+      {/* Edit Description Modal */}
+      <EditDescriptionModal />
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
@@ -406,7 +558,7 @@ const EnhancedReportGeneration = () => {
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-medium">Equipment Photography</h3>
                 <div className="text-sm text-gray-500">
-                  {getTotalImagesSelected()} images selected
+                  {getTotalPhotosSelected()} photos selected
                 </div>
               </div>
             </Card.Header>
@@ -415,85 +567,100 @@ const EnhancedReportGeneration = () => {
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                   <h4 className="text-sm font-medium text-blue-900 mb-2">📸 Photography Guidelines</h4>
                   <ul className="text-sm text-blue-800 space-y-1">
-                    <li>• Take clear, well-lit photos of each equipment category</li>
+                    <li>• Take clear, well-lit photos from multiple angles for each equipment category</li>
                     <li>• Include equipment nameplates and serial numbers when visible</li>
-                    <li>• Use "No Image Available" if equipment is not accessible or doesn't exist</li>
-                    <li>• Photos will be automatically positioned in the report</li>
+                    <li>• You can upload multiple photos per category to show different views</li>
+                    <li>• Each photo must have a description that will appear in the report</li>
+                    <li>• All photos will be professionally formatted in the final report</li>
                   </ul>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {Object.entries(imageCategoryInfo).map(([category, info]) => {
                   const categoryData = imageCategories[category];
-                  const isRequired = !categoryData.optional;
                   
                   return (
-                    <div key={category} className={`border rounded-lg p-4 ${
-                      isRequired ? 'border-orange-200 bg-orange-50' : 'border-gray-200 bg-gray-50'
-                    }`}>
+                    <div key={category} className="border border-gray-200 rounded-lg p-4 bg-white">
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center space-x-2">
                           <span className="text-lg">{info.icon}</span>
                           <div>
                             <h4 className="text-sm font-medium text-gray-900">
                               {info.label}
-                              {isRequired && <span className="text-red-500 ml-1">*</span>}
                             </h4>
                             <p className="text-xs text-gray-500">{info.description}</p>
                           </div>
                         </div>
-                        {categoryData.files.length > 0 && (
-                          <CheckCircle className="w-5 h-5 text-green-500" />
+                        {categoryData.hasPhotos && (
+                          <div className="flex items-center space-x-1">
+                            <CheckCircle className="w-4 h-4 text-green-500" />
+                            <span className="text-xs text-green-600">{categoryData.photos.length}</span>
+                          </div>
                         )}
                       </div>
 
-                      {categoryData.files.length > 0 ? (
-                        <div className="space-y-3">
-                          <div className="grid grid-cols-2 gap-2">
-                            {categoryData.files.map((file, index) => (
-                              <div key={index} className="relative">
+                      {/* Display uploaded photos */}
+                      {categoryData.photos.length > 0 && (
+                        <div className="mb-4 space-y-3">
+                          {categoryData.photos.map((photo) => (
+                            <div key={photo.id} className="border rounded-lg p-3 bg-gray-50">
+                              <div className="flex items-center space-x-3">
                                 <img
-                                  src={URL.createObjectURL(file)}
-                                  alt={file.name}
-                                  className="w-full h-20 object-cover rounded border"
+                                  src={URL.createObjectURL(photo.file)}
+                                  alt={photo.name}
+                                  className="w-16 h-16 object-cover rounded border"
                                 />
-                                <p className="text-xs text-gray-600 mt-1 truncate">{file.name}</p>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-gray-900 truncate">
+                                    {photo.name}
+                                  </p>
+                                  <p className="text-xs text-gray-600 mt-1">
+                                    {photo.description}
+                                  </p>
+                                </div>
+                                <div className="flex space-x-1">
+                                  <button
+                                    onClick={() => handleEditPhotoDescription(category, photo.id)}
+                                    className="p-1 text-blue-600 hover:text-blue-800"
+                                    title="Edit description"
+                                  >
+                                    <Edit3 className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => removePhoto(category, photo.id)}
+                                    className="p-1 text-red-600 hover:text-red-800"
+                                    title="Remove photo"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
                               </div>
-                            ))}
-                          </div>
-                          <button
-                            onClick={() => removeCategoryImage(category)}
-                            className="text-xs text-red-600 hover:text-red-800"
-                          >
-                            Remove Images
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          <div className="border-2 border-dashed border-gray-300 rounded p-3 text-center">
-                            <input
-                              type="file"
-                              multiple
-                              accept="image/*"
-                              onChange={(e) => handleCategoryImageUpload(category, e)}
-                              className="hidden"
-                              id={`upload-${category}`}
-                            />
-                            <label htmlFor={`upload-${category}`} className="cursor-pointer">
-                              <Camera className="mx-auto h-6 w-6 text-gray-400 mb-1" />
-                              <span className="text-xs text-gray-600">Upload Photos</span>
-                            </label>
-                          </div>
-                          
-                          <button
-                            onClick={() => handleNoImageAvailable(category)}
-                            className="w-full text-xs text-gray-500 hover:text-gray-700 border border-gray-300 rounded px-2 py-1"
-                          >
-                            ❌ No Image Available
-                          </button>
+                            </div>
+                          ))}
                         </div>
                       )}
+
+                      {/* Upload button */}
+                      <div className="border-2 border-dashed border-gray-300 rounded p-4 text-center hover:border-gray-400 transition-colors">
+                        <input
+                          type="file"
+                          multiple
+                          accept="image/*"
+                          onChange={(e) => handleCategoryFileSelection(category, e)}
+                          className="hidden"
+                          id={`upload-${category}`}
+                        />
+                        <label htmlFor={`upload-${category}`} className="cursor-pointer">
+                          <Camera className="mx-auto h-6 w-6 text-gray-400 mb-2" />
+                          <span className="text-sm text-gray-600">
+                            {categoryData.photos.length > 0 ? 'Add More Photos' : 'Upload Photos'}
+                          </span>
+                          <p className="text-xs text-gray-500 mt-1">
+                            Multiple photos allowed
+                          </p>
+                        </label>
+                      </div>
                     </div>
                   );
                 })}
@@ -501,19 +668,11 @@ const EnhancedReportGeneration = () => {
 
               <div className="mt-6 flex justify-between items-center">
                 <div className="text-sm text-gray-600">
-                  {(() => {
-                    const status = getRequiredImagesStatus();
-                    return (
-                      <span>
-                        Required sections: {status.completed}/{status.total} 
-                        {status.allComplete ? ' ✅' : ' ⏳'}
-                      </span>
-                    );
-                  })()}
+                  Total photos: {getTotalPhotosSelected()}
                 </div>
                 
                 <div className="flex space-x-3">
-                  {getTotalImagesSelected() > 0 && (
+                  {getTotalPhotosSelected() > 0 && (
                     <button
                       onClick={uploadAllImages}
                       disabled={imageUploadMutation.isLoading}
@@ -527,7 +686,7 @@ const EnhancedReportGeneration = () => {
                       ) : (
                         <>
                           <Upload className="w-4 h-4 mr-2" />
-                          Upload All Images
+                          Upload All Photos ({getTotalPhotosSelected()})
                         </>
                       )}
                     </button>
@@ -546,18 +705,18 @@ const EnhancedReportGeneration = () => {
         </div>
       )}
 
-      {/* Step 3: Content Review - CONTINUING FROM WHERE IT CUT OFF */}
+      {/* Step 3: Content Review */}
       {generationStep === 3 && (
         <div className="space-y-6">
-          {/* ERP Calculations */}
+          {/* ERP Display Section - CHANGED: No calculation, just display */}
           <Card>
             <Card.Header>
-              <h3 className="text-lg font-medium">ERP Calculations</h3>
+              <h3 className="text-lg font-medium">ERP Information</h3>
             </Card.Header>
             <Card.Body>
               <div className="space-y-4">
                 <div className="bg-blue-50 p-4 rounded-lg">
-                  <h4 className="text-sm font-medium text-blue-900 mb-2">Equipment Data</h4>
+                  <h4 className="text-sm font-medium text-blue-900 mb-2">Equipment Data from Inspection</h4>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
                     <div>
                       <span className="text-blue-700">Forward Power:</span>
@@ -565,7 +724,7 @@ const EnhancedReportGeneration = () => {
                     </div>
                     <div>
                       <span className="text-blue-700">Antenna Gain:</span>
-                      <span className="ml-2 font-medium">{inspection?.antenna_gain || 'N/A'} dBd</span>
+                      <span className="ml-2 font-medium">{inspection?.antenna_gain || 'N/A'} dBi</span>
                     </div>
                     <div>
                       <span className="text-blue-700">Frequency:</span>
@@ -574,57 +733,38 @@ const EnhancedReportGeneration = () => {
                   </div>
                 </div>
 
-                {erpCalculations.length > 0 && (
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-900 mb-2">Calculated Results</h4>
-                    <div className="bg-white border rounded-lg overflow-hidden">
-                      <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Channel</th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">ERP (dBW)</th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">ERP (kW)</th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                          {erpCalculations.map((calc, index) => (
-                            <tr key={index}>
-                              <td className="px-4 py-2 text-sm text-gray-900">{calc.channel_number}</td>
-                              <td className="px-4 py-2 text-sm text-gray-900">{calc.erp_dbw}</td>
-                              <td className="px-4 py-2 text-sm text-gray-900">{calc.erp_kw}</td>
-                              <td className="px-4 py-2 text-sm">
-                                <span className={`inline-flex px-2 py-1 text-xs rounded-full ${
-                                  calc.is_compliant ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                                }`}>
-                                  {calc.is_compliant ? 'Compliant' : 'Non-Compliant'}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                {/* Display calculated ERP from inspection */}
+                {(inspection?.effective_radiated_power || inspection?.effective_radiated_power_dbw) && (
+                  <div className="bg-green-50 p-4 rounded-lg">
+                    <h4 className="text-sm font-medium text-green-900 mb-2">Calculated ERP (from Inspection)</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                      {inspection?.effective_radiated_power && (
+                        <div>
+                          <span className="text-green-700">ERP (kW):</span>
+                          <span className="ml-2 font-medium">{inspection.effective_radiated_power} kW</span>
+                        </div>
+                      )}
+                      {inspection?.effective_radiated_power_dbw && (
+                        <div>
+                          <span className="text-green-700">ERP (dBW):</span>
+                          <span className="ml-2 font-medium">{inspection.effective_radiated_power_dbw} dBW</span>
+                        </div>
+                      )}
                     </div>
+                    <p className="text-xs text-green-600 mt-2">
+                      ✅ ERP values were calculated during the inspection process and will be included in the report.
+                    </p>
                   </div>
                 )}
 
-                <button
-                  onClick={calculateERP}
-                  disabled={erpCalculationMutation.isLoading}
-                  className="btn btn-outline"
-                >
-                  {erpCalculationMutation.isLoading ? (
-                    <>
-                      <LoadingSpinner size="sm" />
-                      <span className="ml-2">Calculating...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Calculator className="w-4 h-4 mr-2" />
-                      Calculate ERP
-                    </>
-                  )}
-                </button>
+                {/* Message if no ERP data */}
+                {!inspection?.effective_radiated_power && !inspection?.effective_radiated_power_dbw && (
+                  <div className="bg-amber-50 p-4 rounded-lg">
+                    <p className="text-sm text-amber-800">
+                      ⚠️ No ERP calculations found in the inspection data. The report will include the available equipment specifications.
+                    </p>
+                  </div>
+                )}
               </div>
             </Card.Body>
           </Card>
@@ -683,6 +823,32 @@ const EnhancedReportGeneration = () => {
                     placeholder="Recommendations for the broadcaster (auto-generated if left blank)..."
                   />
                 </div>
+
+                {/* Photo Summary */}
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <h4 className="text-sm font-medium text-gray-900 mb-3">📷 Photo Summary</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {Object.entries(imageCategories).map(([category, data]) => {
+                      const info = imageCategoryInfo[category];
+                      return data.photos.length > 0 && (
+                        <div key={category} className="flex items-center justify-between text-sm">
+                          <span className="text-gray-700">
+                            {info.icon} {info.label}
+                          </span>
+                          <span className="font-medium text-blue-600">
+                            {data.photos.length} photo{data.photos.length !== 1 ? 's' : ''}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-gray-200">
+                    <div className="flex justify-between text-sm font-medium">
+                      <span>Total Photos:</span>
+                      <span className="text-blue-600">{getTotalPhotosSelected()}</span>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div className="flex justify-between mt-6">
@@ -708,7 +874,7 @@ const EnhancedReportGeneration = () => {
       {generationStep === 4 && (
         <Card>
           <Card.Header>
-            <h3 className="text-lg font-medium">Generate Professional Documents</h3>
+            <h3 className="text-lg font-medium">Generate Professional Document</h3>
           </Card.Header>
           <Card.Body>
             <div className="space-y-6">
@@ -716,8 +882,8 @@ const EnhancedReportGeneration = () => {
                 <h4 className="text-sm font-medium text-green-900 mb-2">🎯 Ready for Generation</h4>
                 <ul className="text-sm text-green-800 space-y-1">
                   <li>• Report structure: ✅ Created</li>
-                  <li>• Equipment images: ✅ {getTotalImagesSelected()} uploaded</li>
-                  <li>• ERP calculations: ✅ {erpCalculations.length > 0 ? 'Completed' : 'Ready'}</li>
+                  <li>• Equipment images: ✅ {getTotalPhotosSelected()} photos uploaded</li>
+                  <li>• ERP data: ✅ {(inspection?.effective_radiated_power || inspection?.effective_radiated_power_dbw) ? 'Available from inspection' : 'Will use equipment specs'}</li>
                   <li>• Professional formatting: ✅ CA template applied</li>
                 </ul>
               </div>
@@ -725,30 +891,9 @@ const EnhancedReportGeneration = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Document Formats
+                    Document Format
                   </label>
                   <div className="space-y-2">
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={reportData.formats.includes('pdf')}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setReportData(prev => ({
-                              ...prev,
-                              formats: [...prev.formats, 'pdf']
-                            }));
-                          } else {
-                            setReportData(prev => ({
-                              ...prev,
-                              formats: prev.formats.filter(f => f !== 'pdf')
-                            }));
-                          }
-                        }}
-                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span className="ml-2 text-sm text-gray-900">📄 PDF Document</span>
-                    </label>
                     <label className="flex items-center">
                       <input
                         type="checkbox"
@@ -757,19 +902,22 @@ const EnhancedReportGeneration = () => {
                           if (e.target.checked) {
                             setReportData(prev => ({
                               ...prev,
-                              formats: [...prev.formats, 'docx']
+                              formats: ['docx']
                             }));
                           } else {
                             setReportData(prev => ({
                               ...prev,
-                              formats: prev.formats.filter(f => f !== 'docx')
+                              formats: []
                             }));
                           }
                         }}
                         className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                       />
-                      <span className="ml-2 text-sm text-gray-900">📝 Word Document</span>
+                      <span className="ml-2 text-sm text-gray-900">📝 Word Document (DOCX)</span>
                     </label>
+                    <p className="text-xs text-gray-500 ml-6">
+                      Professional CA inspection report in Microsoft Word format
+                    </p>
                   </div>
                 </div>
 
@@ -811,7 +959,7 @@ const EnhancedReportGeneration = () => {
                     {generateDocumentsMutation.isLoading ? (
                       <>
                         <LoadingSpinner size="sm" />
-                        <span className="ml-2">Generating Professional Documents...</span>
+                        <span className="ml-2">Generating Professional Document...</span>
                       </>
                     ) : (
                       <>
@@ -846,16 +994,40 @@ const EnhancedReportGeneration = () => {
                   <div className="flex justify-between">
                     <span>Images to Include:</span>
                     <span className="font-medium">
-                      {reportData.include_images ? getTotalImagesSelected() : 0} images
+                      {reportData.include_images ? getTotalPhotosSelected() : 0} photos
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span>Document Format:</span>
                     <span className="font-medium">
-                      {reportData.formats.join(', ').toUpperCase()}
+                      {reportData.formats.length > 0 ? reportData.formats.join(', ').toUpperCase() : 'None selected'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>ERP Data:</span>
+                    <span className="font-medium">
+                      {(inspection?.effective_radiated_power || inspection?.effective_radiated_power_dbw) ? 'From inspection' : 'Equipment specs'}
                     </span>
                   </div>
                 </div>
+
+                {/* Detailed photo breakdown */}
+                {reportData.include_images && getTotalPhotosSelected() > 0 && (
+                  <div className="mt-4 pt-4 border-t border-gray-200">
+                    <h5 className="text-xs font-medium text-gray-900 mb-2">Photo Breakdown:</h5>
+                    <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
+                      {Object.entries(imageCategories).map(([category, data]) => {
+                        const info = imageCategoryInfo[category];
+                        return data.photos.length > 0 && (
+                          <div key={category} className="flex justify-between">
+                            <span>{info.label}:</span>
+                            <span>{data.photos.length}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </Card.Body>
