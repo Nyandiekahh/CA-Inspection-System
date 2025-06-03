@@ -1,15 +1,7 @@
-# apps/reports/renderers.py
+# apps/reports/renderers.py - DOCX ONLY
 from rest_framework.renderers import BaseRenderer
 
-class PDFRenderer(BaseRenderer):
-    """Custom renderer for PDF files"""
-    media_type = 'application/pdf'
-    format = 'pdf'
-    charset = None
-    render_style = 'binary'
-
-    def render(self, data, accepted_media_type=None, renderer_context=None):
-        return data
+# REMOVED: PDFRenderer - no longer needed
 
 class DOCXRenderer(BaseRenderer):
     """Custom renderer for Microsoft Word DOCX files"""

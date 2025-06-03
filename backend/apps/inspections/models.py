@@ -146,8 +146,9 @@ class Inspection(models.Model):
     
     # Filter
     filter_type = models.CharField(max_length=50, choices=[
-        ('band_pass', 'Band Pass Filter'),
-        ('notch', 'Notch Filter')
+        ('standard_band_pass', 'Standard Band Pass Filter'),
+        ('notch', 'Notch Filter'),
+        ('high_q_triple_cavity', 'High-Q Triple Cavity Filter'),
     ], blank=True, null=True)
     filter_manufacturer = models.CharField(max_length=255, blank=True, null=True)
     filter_model_number = models.CharField(max_length=255, blank=True, null=True)

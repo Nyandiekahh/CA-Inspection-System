@@ -1,4 +1,4 @@
-# apps/reports/views.py - COMPLETE FIXED VERSION
+# apps/reports/views.py - UPDATED FOR DOCX ONLY & ERP FETCHING
 from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
@@ -18,11 +18,8 @@ from .serializers import (
     InspectionReportSerializer, ReportImageSerializer, 
     ERPCalculationSerializer, ReportGenerationSerializer
 )
-from .services import (
-    DocumentGenerationService, ViolationDetectionService, 
-    ERPCalculationService
-)
-from .renderers import PDFRenderer, DOCXRenderer
+from .services import ViolationDetectionService
+from .renderers import DOCXRenderer  # REMOVED: PDFRenderer
 from apps.inspections.models import Inspection
 
 def parse_numeric_value(value, default=0.0):
@@ -106,42 +103,13 @@ class InspectionReportViewSet(viewsets.ModelViewSet):
             compliance_status=compliance_status
         )
         
-        # Create ERP calculations if equipment data available
-        self._create_erp_calculations(report)
+        # REMOVED: ERP calculation creation since we fetch from inspection
         
         return report
-    
-    def _create_erp_calculations(self, report):
-        """Create ERP calculations from inspection data"""
-        inspection = report.inspection
-        
-        try:
-            # Use the helper function to parse values
-            forward_power = parse_numeric_value(inspection.amplifier_actual_reading, 0)
-            antenna_gain = parse_numeric_value(inspection.antenna_gain, 11.0)
-            frequency = inspection.transmit_frequency or "Unknown"
-            
-            print(f"⚡ Parsed values - Power: {forward_power}W, Gain: {antenna_gain}dBd, Freq: {frequency}")
-            
-            if forward_power > 0:
-                erp_calc = ERPCalculation.objects.create(
-                    report=report,
-                    channel_number="CH.1",
-                    frequency_mhz=frequency,
-                    forward_power_w=forward_power,
-                    antenna_gain_dbd=antenna_gain,
-                    losses_db=1.5
-                )
-                print(f"✅ ERP calculation created: {erp_calc.id}")
-            else:
-                print("ℹ️ No forward power, skipping ERP calculation")
-                
-        except Exception as e:
-            print(f"⚠️ ERP calculation failed: {str(e)}")
 
     @action(detail=True, methods=['post'])
     def generate_documents(self, request, pk=None):
-        """Generate professional documents using enhanced generator"""
+        """Generate professional DOCX document using enhanced generator"""
         try:
             report = self.get_object()
             
@@ -149,19 +117,19 @@ class InspectionReportViewSet(viewsets.ModelViewSet):
             from .document_generator import ProfessionalDocumentGenerator
             
             # Get generation parameters
-            formats = request.data.get('formats', ['pdf'])
+            formats = request.data.get('formats', ['docx'])
             include_images = request.data.get('include_images', True)
             custom_observations = request.data.get('custom_observations', '')
             custom_conclusions = request.data.get('custom_conclusions', '')
             custom_recommendations = request.data.get('custom_recommendations', '')
             
-            # Validate formats
-            valid_formats = ['pdf', 'docx']
+            # UPDATED: Only allow DOCX format
+            valid_formats = ['docx']
             formats = [f for f in formats if f in valid_formats]
             
             if not formats:
                 return Response({
-                    'error': 'At least one valid format (pdf, docx) must be specified'
+                    'error': 'Only DOCX format is supported'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
             # Update report with custom content
@@ -181,14 +149,12 @@ class InspectionReportViewSet(viewsets.ModelViewSet):
             # Prepare response with file URLs
             file_urls = {}
             for format_type, file_path in generated_files.items():
-                if format_type == 'pdf' and report.generated_pdf:
-                    file_urls['pdf'] = request.build_absolute_uri(report.generated_pdf.url)
-                elif format_type == 'docx' and report.generated_docx:
+                if format_type == 'docx' and report.generated_docx:
                     file_urls['docx'] = request.build_absolute_uri(report.generated_docx.url)
             
             return Response({
                 'success': True,
-                'message': 'Professional documents generated successfully',
+                'message': 'Professional document generated successfully',
                 'files': file_urls,
                 'report_id': str(report.id),
                 'reference_number': report.reference_number,
@@ -208,48 +174,10 @@ class InspectionReportViewSet(viewsets.ModelViewSet):
             
             return Response({
                 'success': False,
-                'error': f'Failed to generate documents: {str(e)}'
+                'error': f'Failed to generate document: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=True, methods=['get'], renderer_classes=[PDFRenderer])
-    def download_pdf(self, request, pk=None):
-        """Download generated PDF with proper content negotiation"""
-        report = self.get_object()
-        
-        if not report.generated_pdf:
-            raise Http404("PDF not generated yet")
-        
-        try:
-            # Get the file path
-            file_path = report.generated_pdf.path
-            
-            # Check if file exists
-            if not os.path.exists(file_path):
-                raise Http404("PDF file not found on disk")
-            
-            # Create filename
-            filename = f"{report.reference_number.replace('/', '_')}.pdf"
-            
-            # Return FileResponse for better file handling
-            response = FileResponse(
-                open(file_path, 'rb'),
-                content_type='application/pdf',
-                as_attachment=True,
-                filename=filename
-            )
-            
-            # Add additional headers for better browser compatibility
-            response['Content-Disposition'] = f'attachment; filename="{filename}"'
-            response['Content-Length'] = os.path.getsize(file_path)
-            response['Cache-Control'] = 'no-cache'
-            
-            return response
-            
-        except Exception as e:
-            print(f"PDF download error: {str(e)}")
-            return Response({
-                'error': f'Failed to download PDF: {str(e)}'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    # REMOVED: download_pdf action - no longer needed
     
     @action(detail=True, methods=['get'], renderer_classes=[DOCXRenderer])
     def download_docx(self, request, pk=None):
@@ -301,8 +229,16 @@ class InspectionReportViewSet(viewsets.ModelViewSet):
         violation_service = ViolationDetectionService(inspection)
         violations = violation_service.detect_violations()
         
-        # Get ERP calculations
-        erp_calculations = list(report.erp_details.all().values())
+        # UPDATED: Get ERP data from inspection instead of calculations
+        erp_data = []
+        if inspection.effective_radiated_power or inspection.effective_radiated_power_dbw:
+            erp_data.append({
+                'channel_number': 'CH.1',
+                'frequency_mhz': inspection.transmit_frequency or 'Unknown',
+                'erp_kw': inspection.effective_radiated_power,
+                'erp_dbw': inspection.effective_radiated_power_dbw,
+                'source': 'inspection'
+            })
         
         # Preview data
         preview_data = {
@@ -351,7 +287,7 @@ class InspectionReportViewSet(viewsets.ModelViewSet):
                 'height_on_tower': inspection.height_on_tower,
                 'polarization': inspection.get_polarization_display() if inspection.polarization else None,
             },
-            'erp_calculations': erp_calculations,
+            'erp_data': erp_data,  # UPDATED: Use erp_data instead of erp_calculations
             'violations': violations,
             'images': list(report.images.all().values(
                 'id', 'image_type', 'caption', 'position_in_report', 'image'
@@ -367,23 +303,20 @@ class InspectionReportViewSet(viewsets.ModelViewSet):
         report = self.get_object()
         inspection = report.inspection
         
-        # Define image requirements based on station type
+        # Define image requirements based on station type - UPDATED TO MATCH FRONTEND
         base_requirements = {
             'site_overview': {'required': False, 'description': 'Overall view of the transmitter site'},
-            'tower_structure': {'required': True, 'description': 'Tower or mast supporting the antenna'},
-            'exciter': {'required': True, 'description': 'Exciter unit and related equipment'},
-            'amplifier': {'required': True, 'description': 'Power amplifier and associated equipment'},
-            'antenna_system': {'required': True, 'description': 'Antenna and mounting hardware'},
-            'filter': {'required': False, 'description': 'Band pass filters and combiners'},
-            'studio_link': {'required': False, 'description': 'STL equipment and connections'},
-            'transmitter_room': {'required': False, 'description': 'Interior view of transmitter facility'},
-            'equipment_rack': {'required': False, 'description': 'Equipment racks and installations'},
-            'other': {'required': False, 'description': 'Any other relevant equipment'}
+            'tower_mast': {'required': True, 'description': 'Tower or mast supporting the antenna'},
+            'transmitter_equipment': {'required': True, 'description': 'Exciter, amplifier and related equipment'},
+            'antenna': {'required': True, 'description': 'Antenna and mounting hardware'},
+            'filter_equipment': {'required': False, 'description': 'Band pass filters and combiners'},
+            'studio_transmitter_link': {'required': False, 'description': 'STL equipment and connections'},
+            'other_equipment': {'required': False, 'description': 'Any other relevant equipment'}
         }
         
         # Adjust requirements based on station type
         if inspection.station_type == 'TV':
-            base_requirements['filter']['required'] = True  # TV usually has combiners
+            base_requirements['filter_equipment']['required'] = True  # TV usually has combiners
         
         # Check current status
         current_images = {}
@@ -419,14 +352,23 @@ class InspectionReportViewSet(viewsets.ModelViewSet):
         violation_service = ViolationDetectionService(inspection)
         violations = violation_service.detect_violations()
         
-        # Get ERP calculations
-        erp_calculations = list(report.erp_details.all().values())
+        # UPDATED: Get ERP data from inspection instead of ERPCalculation model
+        erp_data = []
+        if inspection.effective_radiated_power or inspection.effective_radiated_power_dbw:
+            erp_data.append({
+                'channel_number': 'CH.1',
+                'frequency_mhz': inspection.transmit_frequency or 'Unknown',
+                'erp_kw': float(inspection.effective_radiated_power) if inspection.effective_radiated_power else None,
+                'erp_dbw': float(inspection.effective_radiated_power_dbw) if inspection.effective_radiated_power_dbw else None,
+                'forward_power_w': parse_numeric_value(inspection.amplifier_actual_reading or inspection.exciter_actual_reading),
+                'antenna_gain_dbi': parse_numeric_value(inspection.antenna_gain),
+                'source': 'inspection'
+            })
         
-        # Get images organized by category
+        # Get images organized by category - UPDATED CATEGORIES
         images_by_category = {}
-        for image_type in ['site_overview', 'tower_structure', 'exciter', 'amplifier', 
-                          'antenna_system', 'filter', 'studio_link', 'transmitter_room',
-                          'equipment_rack', 'other']:
+        for image_type in ['site_overview', 'tower_mast', 'transmitter_equipment', 'antenna', 
+                          'studio_transmitter_link', 'filter_equipment', 'other_equipment']:
             images = list(report.images.filter(image_type=image_type).values(
                 'id', 'image', 'caption', 'image_type', 'uploaded_at'
             ))
@@ -506,7 +448,7 @@ class InspectionReportViewSet(viewsets.ModelViewSet):
                 'frequency': inspection.studio_frequency,
                 'signal_description': inspection.signal_description,
             },
-            'erp_calculations': erp_calculations,
+            'erp_data': erp_data,  # UPDATED: Use ERP data from inspection
             'violations': violations,
             'images_by_category': images_by_category,
             'compliance_status': report.compliance_status,
@@ -517,8 +459,7 @@ class InspectionReportViewSet(viewsets.ModelViewSet):
             },
             'generation_status': {
                 'can_generate': report.status in ['draft', 'pending_review'],
-                'pdf_available': bool(report.generated_pdf),
-                'docx_available': bool(report.generated_docx),
+                'docx_available': bool(report.generated_docx),  # REMOVED: pdf_available
                 'last_generated': report.date_completed,
             }
         }
@@ -556,129 +497,7 @@ class InspectionReportViewSet(viewsets.ModelViewSet):
             'minor_violations': len([v for v in violations if v['severity'] == 'minor']),
         })
 
-class ERPCalculationViewSet(viewsets.ModelViewSet):
-    """ViewSet for managing ERP calculations"""
-    queryset = ERPCalculation.objects.all()
-    serializer_class = ERPCalculationSerializer
-    permission_classes = [IsAuthenticated]
-    
-    def get_queryset(self):
-        """Filter calculations by report"""
-        queryset = super().get_queryset()
-        
-        report_id = self.request.query_params.get('report')
-        if report_id:
-            queryset = queryset.filter(report_id=report_id)
-        
-        return queryset.select_related('report')
-    
-    @action(detail=False, methods=['post'])
-    def calculate_erp(self, request):
-        """Calculate ERP from provided values"""
-        try:
-            forward_power = float(request.data.get('forward_power_w', 0))
-            antenna_gain = float(request.data.get('antenna_gain_dbd', 11.0))
-            losses = float(request.data.get('losses_db', 1.5))
-            
-            if forward_power <= 0:
-                return Response({
-                    'error': 'Forward power must be greater than 0'
-                }, status=status.HTTP_400_BAD_REQUEST)
-            
-            # Calculate ERP
-            erp_calc = ERPCalculationService.calculate_erp(
-                forward_power, antenna_gain, losses
-            )
-            
-            # Check compliance
-            authorized_kw = float(request.data.get('authorized_kw', 10.0))
-            compliance = ERPCalculationService.check_compliance(
-                erp_calc['erp_kw'], authorized_kw
-            )
-            
-            return Response({
-                'calculations': erp_calc,
-                'compliance': compliance,
-                'formula': f"ERP = 10*log10({forward_power}) + {antenna_gain} - {losses} = {erp_calc['erp_dbw']} dBW ({erp_calc['erp_kw']} kW)"
-            })
-            
-        except (ValueError, TypeError) as e:
-            return Response({
-                'error': f'Invalid input values: {str(e)}'
-            }, status=status.HTTP_400_BAD_REQUEST)
-    
-    @action(detail=False, methods=['post'])
-    def bulk_calculate(self, request):
-        """Calculate ERP for multiple channels"""
-        report_id = request.data.get('report_id')
-        channels = request.data.get('channels', [])
-        
-        if not report_id:
-            return Response({
-                'error': 'Report ID required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        report = get_object_or_404(InspectionReport, id=report_id)
-        
-        calculations = []
-        errors = []
-        
-        for channel_data in channels:
-            try:
-                # Extract channel data with improved parsing
-                channel_number = channel_data.get('channel_number', 'CH.1')
-                frequency_mhz = channel_data.get('frequency_mhz', 'Unknown')
-                
-                # Use helper function to parse numeric values
-                forward_power = parse_numeric_value(channel_data.get('forward_power_w'), 0)
-                antenna_gain = parse_numeric_value(channel_data.get('antenna_gain_dbd'), 11.0)
-                losses = parse_numeric_value(channel_data.get('losses_db'), 1.5)
-                
-                print(f"📊 Channel {channel_number}: Power={forward_power}, Gain={antenna_gain}, Losses={losses}")
-                
-                if forward_power <= 0:
-                    errors.append({
-                        'channel': channel_number,
-                        'error': 'Forward power must be greater than 0'
-                    })
-                    continue
-                
-                # Create or update ERP calculation
-                calc, created = ERPCalculation.objects.update_or_create(
-                    report=report,
-                    channel_number=channel_number,
-                    defaults={
-                        'frequency_mhz': frequency_mhz,
-                        'forward_power_w': forward_power,
-                        'antenna_gain_dbd': antenna_gain,
-                        'losses_db': losses
-                    }
-                )
-                
-                calculations.append({
-                    'id': calc.id,
-                    'channel_number': calc.channel_number,
-                    'frequency_mhz': calc.frequency_mhz,
-                    'erp_dbw': float(calc.erp_dbw),
-                    'erp_kw': float(calc.erp_kw),
-                    'is_compliant': calc.is_compliant,
-                    'created': created
-                })
-                
-            except Exception as e:
-                print(f"❌ Error calculating ERP for channel {channel_data.get('channel_number', 'Unknown')}: {str(e)}")
-                errors.append({
-                    'channel': channel_data.get('channel_number', 'Unknown'),
-                    'error': str(e)
-                })
-        
-        return Response({
-            'success': True,
-            'calculations': calculations,
-            'errors': errors,
-            'total_calculated': len(calculations),
-            'total_errors': len(errors)
-        })
+# REMOVED: ERPCalculationViewSet - no longer needed since we fetch from inspection
 
 class ReportImageViewSet(viewsets.ModelViewSet):
     """ViewSet for managing report images"""
@@ -727,23 +546,22 @@ class ReportImageViewSet(viewsets.ModelViewSet):
         uploaded_images = []
         errors = []
         
-        # Process multiple files with enhanced metadata
+        # UPDATED: Process files with correct image type validation
         for key, file in request.FILES.items():
             print(f"📷 Processing file: {key} - {file.name}")
             
             try:
                 # Extract metadata from form data
-                image_type = request.data.get(f'{key}_type', 'other')
+                image_type = request.data.get(f'{key}_type', 'other_equipment')
                 caption = request.data.get(f'{key}_caption', file.name.split('.')[0])
                 position = request.data.get(f'{key}_position', 'equipment_section')
                 
                 print(f"   Type: {image_type}, Caption: {caption}, Position: {position}")
                 
-                # Validate image type
+                # UPDATED: Validate image type with correct categories
                 valid_types = [
-                    'site_overview', 'tower_structure', 'exciter', 'amplifier',
-                    'antenna_system', 'filter', 'studio_link', 'transmitter_room',
-                    'equipment_rack', 'other'
+                    'site_overview', 'tower_mast', 'transmitter_equipment', 'antenna',
+                    'studio_transmitter_link', 'filter_equipment', 'other_equipment'
                 ]
                 
                 if image_type not in valid_types:
@@ -947,31 +765,8 @@ def create_report_from_inspection(request, inspection_id):
         report.save()
         print("✅ Report updated with violations")
         
-        # Create ERP calculation if possible
-        print("⚡ Creating ERP calculation...")
-        try:
-            # Use the helper function to parse values
-            forward_power = parse_numeric_value(inspection.amplifier_actual_reading, 0)
-            antenna_gain = parse_numeric_value(inspection.antenna_gain, 11.0)
-            frequency = inspection.transmit_frequency or "Unknown"
-            
-            print(f"⚡ Parsed values - Power: {forward_power}W, Gain: {antenna_gain}dBd, Freq: {frequency}")
-            
-            if forward_power > 0:
-                erp_calc = ERPCalculation.objects.create(
-                    report=report,
-                    channel_number="CH.1",
-                    frequency_mhz=frequency,
-                    forward_power_w=forward_power,
-                    antenna_gain_dbd=antenna_gain,
-                    losses_db=1.5
-                )
-                print(f"✅ ERP calculation created: {erp_calc.id}")
-            else:
-                print("ℹ️ No forward power, skipping ERP calculation")
-                
-        except Exception as erp_error:
-            print(f"⚠️ ERP calculation failed: {str(erp_error)}")
+        # REMOVED: ERP calculation creation since we fetch from inspection
+        print("ℹ️ ERP data will be fetched from inspection record when generating document")
         
         print("🎉 SUCCESS: Report creation completed")
         
@@ -1008,11 +803,12 @@ def get_report_templates(request):
                 'Tower/Mast Details',
                 'Transmitter Equipment',
                 'Antenna System',
-                'ERP Calculations',
+                'ERP Information',
                 'Observations',
                 'Conclusions',
                 'Recommendations'
-            ]
+            ],
+            'format': 'DOCX'  # UPDATED: Only DOCX
         },
         {
             'id': 'tv_broadcast',
@@ -1023,11 +819,12 @@ def get_report_templates(request):
                 'Tower/Mast Details',
                 'Multi-Channel Transmitters',
                 'Antenna Systems',
-                'ERP Calculations (Multiple Channels)',
+                'ERP Information (Multiple Channels)',
                 'Observations',
                 'Conclusions',
                 'Recommendations'
-            ]
+            ],
+            'format': 'DOCX'  # UPDATED: Only DOCX
         },
         {
             'id': 'am_radio',
@@ -1038,11 +835,12 @@ def get_report_templates(request):
                 'Antenna Array',
                 'Transmitter Equipment',
                 'Ground System',
-                'Power Calculations',
+                'Power Information',
                 'Observations',
                 'Conclusions',
                 'Recommendations'
-            ]
+            ],
+            'format': 'DOCX'  # UPDATED: Only DOCX
         }
     ]
     
@@ -1060,7 +858,8 @@ def get_report_templates(request):
                 'body_size': 10,
                 'heading_font': 'Helvetica-Bold',
                 'heading_size': 12
-            }
+            },
+            'supported_formats': ['docx']  # UPDATED: Only DOCX
         }
     })
 
@@ -1092,8 +891,8 @@ def validate_report_data(request):
             if not inspection.transmitting_site_name:
                 warnings.append("Transmitting site name is missing")
             
-            if not inspection.amplifier_actual_reading:
-                warnings.append("Amplifier power reading is missing")
+            if not inspection.amplifier_actual_reading and not inspection.exciter_actual_reading:
+                warnings.append("Power readings are missing")
             
             if not inspection.antenna_gain:
                 warnings.append("Antenna gain is missing")
@@ -1101,18 +900,12 @@ def validate_report_data(request):
             if not inspection.contact_name:
                 warnings.append("Contact person name is missing")
                 
+            # Check ERP data availability
+            if not inspection.effective_radiated_power and not inspection.effective_radiated_power_dbw:
+                warnings.append("No ERP data found in inspection - will use equipment specifications")
+                
         except Inspection.DoesNotExist:
             errors.append("Invalid inspection ID")
-    
-    # ERP calculation validation
-    erp_data = request.data.get('erp_calculations', [])
-    for i, calc in enumerate(erp_data):
-        try:
-            power = parse_numeric_value(calc.get('forward_power_w'), 0)
-            if power <= 0:
-                errors.append(f"ERP calculation {i+1}: Forward power must be greater than 0")
-        except (ValueError, TypeError):
-            errors.append(f"ERP calculation {i+1}: Invalid power value")
     
     return Response({
         'valid': len(errors) == 0,

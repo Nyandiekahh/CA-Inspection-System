@@ -53,16 +53,18 @@ class Amplifier(models.Model):
     class Meta:
         db_table = 'amplifiers'
 
+# Updated models.py - Filter class
 class Filter(models.Model):
     """Filter Information"""
     FILTER_TYPES = [
-        ('band_pass', 'Band Pass Filter'),
+        ('standard_band_pass', 'Standard Band Pass Filter'),
         ('notch', 'Notch Filter'),
+        ('high_q_triple_cavity', 'High-Q Triple Cavity Filter'),
     ]
     
     general_data = models.ForeignKey(GeneralData, on_delete=models.CASCADE, related_name='filters')
     
-    filter_type = models.CharField(max_length=20, choices=FILTER_TYPES, verbose_name="Type")
+    filter_type = models.CharField(max_length=30, choices=FILTER_TYPES, verbose_name="Type")  # Increased max_length
     manufacturer = models.CharField(max_length=200, blank=True)
     model_number = models.CharField(max_length=100, blank=True)
     serial_number = models.CharField(max_length=100, blank=True)

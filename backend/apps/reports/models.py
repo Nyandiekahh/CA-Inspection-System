@@ -1,4 +1,4 @@
-# apps/reports/models.py
+# apps/reports/models.py - Updated to match frontend categories
 from django.db import models
 from django.contrib.auth import get_user_model
 from apps.inspections.models import Inspection
@@ -141,18 +141,16 @@ class InspectionReport(models.Model):
         ordering = ['-created_at']
 
 class ReportImage(models.Model):
-    """Images attached to reports"""
+    """Images attached to reports - UPDATED TO MATCH FRONTEND CATEGORIES"""
     IMAGE_TYPES = [
+        # Updated to match frontend exactly
         ('site_overview', 'Site Overview'),
-        ('tower_structure', 'Tower Structure'),
-        ('exciter', 'Exciter Equipment'),
-        ('amplifier', 'Amplifier Equipment'),
-        ('antenna_system', 'Antenna System'),
-        ('filter', 'Filter Equipment'),
-        ('studio_link', 'Studio Link Equipment'),
-        ('transmitter_room', 'Transmitter Room'),
-        ('equipment_rack', 'Equipment Rack'),
-        ('other', 'Other'),
+        ('tower_mast', 'Tower/Mast Structure'),  # Match frontend key
+        ('transmitter_equipment', 'Transmitter Equipment'),  # Match frontend key
+        ('antenna', 'Antenna System'),  # Match frontend key
+        ('studio_transmitter_link', 'Studio to Transmitter Link'),
+        ('filter_equipment', 'Filter Equipment'),  # Match frontend key
+        ('other_equipment', 'Other Equipment'),  # Match frontend key
     ]
     
     POSITIONING = [
@@ -165,7 +163,7 @@ class ReportImage(models.Model):
     
     report = models.ForeignKey(InspectionReport, on_delete=models.CASCADE, related_name='images')
     image = models.ImageField(upload_to=report_image_upload_path)
-    image_type = models.CharField(max_length=20, choices=IMAGE_TYPES)
+    image_type = models.CharField(max_length=30, choices=IMAGE_TYPES)  # Increased max_length
     
     # Image metadata
     caption = models.CharField(max_length=300, help_text="Image caption for the report")
@@ -204,6 +202,7 @@ class ReportImage(models.Model):
         db_table = 'report_images'
         ordering = ['position_in_report', 'order_in_section']
 
+# Rest of the models remain the same...
 class ReportTemplate(models.Model):
     """Report Templates for different types of inspections"""
     name = models.CharField(max_length=200)
